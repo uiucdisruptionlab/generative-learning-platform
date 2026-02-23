@@ -4,15 +4,18 @@ export default function LoginPage() {
   return (
     <div
       className="min-h-screen flex flex-col relative"
-      style={{ background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 40%, #fcd34d 70%, #fbbf24 100%)' }}
+      style={{ background: 'linear-gradient(135deg, #fef9c3 0%, #fef3c7 20%, #fff7ed 40%, #fed7aa 60%, #fecaca 80%, #fef3c7 100%)' }}
     >
       <div className="learning-pathway absolute w-full h-full overflow-hidden z-0 pointer-events-none">
         <svg className="absolute w-full h-full opacity-30" fill="none" viewBox="0 0 1440 800" xmlns="http://www.w3.org/2000/svg">
-          <path className="stroke-dasharray-[10,10]" d="M-50 750C200 650 400 700 600 500C800 300 1100 400 1490 100"           stroke="#2c5926" strokeWidth={4} />
+          <path className="stroke-dasharray-[10,10]" d="M-50 750C200 650 400 700 600 500C800 300 1100 400 1490 100" stroke="#2c5926" strokeWidth={4} />
           <path className="stroke-dasharray-[10,10]" d="M1500 750C1200 600 1000 650 720 400C440 150 200 200 -50 50" stroke="#f59e0b" strokeWidth={4} />
-          <circle className="opacity-30" cx="10%" cy="20%" fill="#fde68a" r="40" />
-          <circle className="opacity-30" cx="85%" cy="75%" fill="#fcd34d" r="60" />
-          <circle className="opacity-30" cx="90%" cy="15%" fill="#fbbf24" r="30" />
+          <path className="stroke-dasharray-[10,10]" d="M100 200C400 350 800 150 1200 300" stroke="#f87171" strokeWidth={3} />
+          <circle className="opacity-25" cx="10%" cy="20%" fill="#fde68a" r="40" />
+          <circle className="opacity-25" cx="85%" cy="75%" fill="#fed7aa" r="60" />
+          <circle className="opacity-25" cx="90%" cy="15%" fill="#fecaca" r="30" />
+          <circle className="opacity-20" cx="50%" cy="85%" fill="#fbbf24" r="50" />
+          <circle className="opacity-20" cx="70%" cy="40%" fill="#fdba74" r="35" />
           <path className="opacity-40" d="M200 800 L300 600" stroke="white" strokeWidth={2} />
           <path className="opacity-40" d="M220 800 L320 600" stroke="white" strokeWidth={2} />
         </svg>
@@ -21,6 +24,9 @@ export default function LoginPage() {
         </div>
         <div className="absolute top-[10%] right-[12%] -rotate-[15deg] text-amber-500/20">
           <span className="material-symbols-outlined text-[80px]">rocket_launch</span>
+        </div>
+        <div className="absolute top-[60%] left-[5%] rotate-12 text-rose-400/15">
+          <span className="material-symbols-outlined text-[60px]">rocket_launch</span>
         </div>
       </div>
 

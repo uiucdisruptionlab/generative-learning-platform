@@ -24,10 +24,10 @@ export default {
         "primary-light": "#2D6A4F",
       },
       fontFamily: {
-        display: ["Syne", "sans-serif"],
-        logo: ["Plus Jakarta Sans", "sans-serif"],
-        sans: ["Lexend", "Inter", "sans-serif"],
-        serif: ["Syne", "sans-serif"],
+        display: ["DM Sans", "sans-serif"],
+        logo: ["DM Sans", "sans-serif"],
+        sans: ["Inter", "Lexend", "sans-serif"],
+        serif: ["DM Sans", "sans-serif"],
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",

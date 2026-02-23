@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import AppLayout from '../components/AppLayout'
 
-export default function DashboardPage() {
+export default function CareerPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
 

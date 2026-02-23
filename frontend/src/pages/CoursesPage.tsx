@@ -10,7 +10,7 @@ export default function CoursesPage() {
     { code: 'CS 101', title: 'Intro to Python', prof: 'Prof. David Miller', badge: 'Exam Soon', badgeStyle: 'bg-emerald-600 text-white', gradient: 'from-primary/45 to-emerald-300/70 dark:from-primary/50 dark:to-emerald-400/50' },
     { code: 'MKTG 440', title: 'Digital Marketing', prof: 'Prof. Elena Rodriguez', badge: 'New Content', badgeStyle: 'bg-white/90 dark:bg-slate-900/90 backdrop-blur text-amber-600', gradient: 'from-amber-200 to-amber-100 dark:from-amber-800/60 dark:to-amber-900/40' },
     { code: 'HIST 102', title: 'World History II', prof: 'Prof. James Wilson', badge: null, gradient: 'from-violet-200 to-purple-100 dark:from-violet-800/60 dark:to-purple-900/40' },
-    { code: 'ECON 201', title: 'Macroeconomics', prof: 'Prof. Robert Smith', badge: null, gradient: 'from-indigo-200 to-indigo-100 dark:from-indigo-800/60 dark:to-indigo-900/40' },
+    { code: 'ECON 201', title: 'Macroeconomics', prof: 'Prof. Robert Smith', badge: null, gradient: 'from-blue-200 to-sky-100 dark:from-blue-800/60 dark:to-sky-900/40' },
   ]
 
   return (

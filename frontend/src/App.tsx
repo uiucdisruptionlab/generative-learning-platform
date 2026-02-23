@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
-import DashboardPage from './pages/DashboardPage'
+import CareerPage from './pages/CareerPage'
 import CoursesPage from './pages/CoursesPage'
 
 function App() {
@@ -9,10 +9,10 @@ function App() {
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
       {/* /home → HomePage (Personalized Learning: Welcome back, skill radar, recommendations) */}
-      {/* /dashboard → DashboardPage (GLP Platform: Professional Profile, AI Resume Tailoring) */}
+      {/* /dashboard → Career Hub (Professional Profile, AI Resume Tailoring) */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/home" element={<HomePage />} />
-      <Route path="/dashboard" element={<DashboardPage />} />
+      <Route path="/dashboard" element={<CareerPage />} />
       <Route path="/courses" element={<CoursesPage />} />
     </Routes>
   )
