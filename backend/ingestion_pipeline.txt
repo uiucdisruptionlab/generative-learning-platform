@@ -1,0 +1,17 @@
+document
+   ↓
+extract text 
+   ↓
+split by headings/slides or semantic split (can be decided later)
+   ↓
+enforce max chunk size
+   ↓
+form chunk 
+   ↓
+generate embedding
+   ↓
+create CourseChunk object
+   ↓
+convert to Pinecone record
+   ↓
+upsert

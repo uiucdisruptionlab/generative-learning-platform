@@ -3,7 +3,7 @@ import json
 import boto3
 
 # If you already set the API key as an environment variable, you can comment this line out
-os.environ['AWS_BEARER_TOKEN_BEDROCK'] = "API KEY"
+# os.environ['AWS_BEARER_TOKEN_BEDROCK'] = "API_KEY"
 
 # Create an Amazon Bedrock client
 client = boto3.client(
