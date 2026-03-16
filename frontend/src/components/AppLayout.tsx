@@ -54,6 +54,17 @@ export default function AppLayout({
               <span className="text-sm font-semibold">Home</span>
             </Link>
             <Link
+              to="/roadmap"
+              className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
+                location.pathname === '/roadmap'
+                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              <span className="material-symbols-outlined group-hover:text-primary transition-colors">route</span>
+              <span className="text-sm font-semibold">Roadmap</span>
+            </Link>
+            <Link
               to="/dashboard"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
                 location.pathname === '/dashboard'

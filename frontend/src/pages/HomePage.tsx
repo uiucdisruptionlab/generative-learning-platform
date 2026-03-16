@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import AppLayout from '../components/AppLayout'
+import LearningRoadmap from '../components/LearningRoadmap'
 
 export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -41,6 +42,21 @@ export default function HomePage() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-8 border-2 border-emerald-200/80 dark:border-emerald-800/40 shadow-soft">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">route</span>
+                Financial Accounting Roadmap
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                6 learning outcomes · Personalized for you
+              </p>
+            </div>
+          </div>
+          <LearningRoadmap compact showViewFullLink />
         </section>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 min-w-0">
