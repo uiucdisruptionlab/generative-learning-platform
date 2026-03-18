@@ -12,8 +12,10 @@ try:
 except ImportError:
     boto3 = None
 
-MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
-AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+MODEL_ID = os.getenv("BEDROCK_MODEL_ID",
+                     "anthropic.claude-3-haiku-20240307-v1:0")
+AWS_REGION = os.getenv("AWS_REGION", os.getenv(
+    "AWS_DEFAULT_REGION", "us-east-1"))
 USE_MOCK_LLM = os.getenv("USE_MOCK_LLM", "false").lower() == "true"
 
 TERMINATION_PATTERNS = [
@@ -55,7 +57,8 @@ QUIZ_QUESTIONS = [
         "options": [
             ("break_into_steps", "Break it into smaller steps"),
             ("look_for_examples", "Look for similar examples"),
-            ("try_different_approaches", "Try different approaches until something works"),
+            ("try_different_approaches",
+             "Try different approaches until something works"),
             ("ask_for_guidance", "Ask for guidance first"),
         ],
     },
@@ -153,7 +156,8 @@ class BedrockJSONChatClient:
                 raise RuntimeError(
                     "boto3 is not installed. Install it or run with USE_MOCK_LLM=true."
                 )
-            self.client = boto3.client("bedrock-runtime", region_name=region_name)
+            self.client = boto3.client(
+                "bedrock-runtime", region_name=region_name)
 
     def send(
         self,
@@ -273,7 +277,8 @@ class BedrockJSONChatClient:
                 updates["major"] = maybe_major
 
         if not profile.get("minor"):
-            minor_match = re.search(r"minor(?:ing)? in\s+([A-Za-z&/ ,\\-]+)", msg, flags=re.I)
+            minor_match = re.search(
+                r"minor(?:ing)? in\s+([A-Za-z&/ ,\\-]+)", msg, flags=re.I)
             if minor_match:
                 updates["minor"] = clean_fragment(minor_match.group(1))
 
