@@ -4,21 +4,17 @@ import OnboardingPage from './pages/OnboardingPage'
 import HomePage from './pages/HomePage'
 import RoadmapPage from './pages/RoadmapPage'
 import IncomeStatementPage from './pages/IncomeStatementPage'
-import CareerPage from './pages/CareerPage'
 import CoursesPage from './pages/CoursesPage'
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
-      {/* /home → HomePage (Personalized Learning: Welcome back, skill radar, recommendations) */}
-      {/* /dashboard → Career Hub (Professional Profile, AI Resume Tailoring) */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/home" element={<HomePage />} />
       <Route path="/roadmap" element={<RoadmapPage />} />
       <Route path="/module/income-statement" element={<IncomeStatementPage />} />
-      <Route path="/dashboard" element={<CareerPage />} />
       <Route path="/courses" element={<CoursesPage />} />
     </Routes>
   )

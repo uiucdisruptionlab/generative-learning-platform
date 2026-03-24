@@ -6,7 +6,7 @@ export default function CoursesPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   const courses = [
-    { code: 'ACCY 301', title: 'Financial Accounting', prof: 'Prof. Sarah Jenkins', badge: 'Canvas Synced', badgeStyle: 'bg-red-600 text-white', gradient: 'from-rose-200 to-red-100 dark:from-rose-800/60 dark:to-red-900/40' },
+    { code: 'ACCY 301', title: 'Financial Accounting', prof: 'Prof. Sarah Jenkins', badge: null, gradient: 'from-rose-200 to-red-100 dark:from-rose-800/60 dark:to-red-900/40' },
     { code: 'CS 101', title: 'Intro to Python', prof: 'Prof. David Miller', badge: 'Exam Soon', badgeStyle: 'bg-emerald-600 text-white', gradient: 'from-primary/45 to-emerald-300/70 dark:from-primary/50 dark:to-emerald-400/50' },
     { code: 'MKTG 440', title: 'Digital Marketing', prof: 'Prof. Elena Rodriguez', badge: 'New Content', badgeStyle: 'bg-white/90 dark:bg-slate-900/90 backdrop-blur text-amber-600', gradient: 'from-amber-200 to-amber-100 dark:from-amber-800/60 dark:to-amber-900/40' },
     { code: 'HIST 102', title: 'World History II', prof: 'Prof. James Wilson', badge: null, gradient: 'from-violet-200 to-purple-100 dark:from-violet-800/60 dark:to-purple-900/40' },
@@ -21,12 +21,6 @@ export default function CoursesPage() {
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
       title="My Courses"
       description="Manage your academic workload and AI-enhanced learning paths."
-      action={
-        <button className="flex items-center gap-2 px-5 py-2.5 bg-white/95 dark:bg-slate-800/95 hover:bg-primary/10 dark:hover:bg-primary/20 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-xl transition-all border border-primary/30 hover:border-primary/50 shadow-sm">
-          <span className="material-symbols-outlined text-lg">sync</span>
-          Sync with Canvas
-        </button>
-      }
     >
       <div className="max-w-7xl mx-auto px-6 sm:px-12 py-12 lg:py-16 min-w-0">
         <div className="flex flex-col sm:flex-row gap-6 mb-12">
@@ -55,7 +49,7 @@ export default function CoursesPage() {
               <div className={`h-32 bg-primary/5 relative overflow-hidden`}>
                 <div className={`absolute inset-0 bg-gradient-to-br ${course.gradient}`} />
                 {course.badge && (
-                  <div className={`absolute top-4 ${i === 1 ? 'left-4' : 'right-4'} ${course.badgeStyle} px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest uppercase shadow-sm`}>
+                  <div className={`absolute top-4 right-4 ${course.badgeStyle} px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest uppercase shadow-sm`}>
                     {course.badge}
                   </div>
                 )}

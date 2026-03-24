@@ -46,7 +46,7 @@ export default function AppLayout({
               to="/home"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
                 location.pathname === '/home'
-                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
@@ -57,7 +57,7 @@ export default function AppLayout({
               to="/roadmap"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
                 location.pathname === '/roadmap'
-                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
@@ -65,39 +65,16 @@ export default function AppLayout({
               <span className="text-sm font-semibold">Roadmap</span>
             </Link>
             <Link
-              to="/dashboard"
-              className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
-                location.pathname === '/dashboard'
-                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
-                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">work</span>
-              <span className="text-sm font-semibold">Career Hub</span>
-            </Link>
-            <Link
               to="/courses"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
                 location.pathname === '/courses'
-                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
               <span className="material-symbols-outlined group-hover:text-primary transition-colors">book</span>
               <span className="text-sm font-semibold">My Courses</span>
             </Link>
-            <a href="#" className="flex items-center gap-3.5 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">ads_click</span>
-              <span className="text-sm font-semibold">Skills Path</span>
-            </a>
-            <a href="#" className="flex items-center gap-3.5 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">assignment</span>
-              <span className="text-sm font-semibold">Assignments</span>
-            </a>
-            <a href="#" className="flex items-center gap-3.5 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">bar_chart</span>
-              <span className="text-sm font-semibold">Performance</span>
-            </a>
           </nav>
         </div>
         <div className="mt-auto p-8 pt-0 border-t border-slate-100 dark:border-slate-800">

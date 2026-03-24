@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { sendMessage, type OnboardingMessage } from '../api/onboarding'
 
@@ -8,6 +8,8 @@ export default function OnboardingPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [showContinueButton, setShowContinueButton] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   async function handleChatSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -30,6 +32,18 @@ export default function OnboardingPage() {
       setLoading(false)
     }
   }
+
+  // Autoscroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  // Keep input focused when not loading and continue button not shown
+  useEffect(() => {
+    if (!loading && !showContinueButton) {
+      inputRef.current?.focus()
+    }
+  }, [loading, showContinueButton, messages])
 
   useEffect(() => {
     if (messages.length > 0 || loading) return
@@ -95,26 +109,29 @@ export default function OnboardingPage() {
                     </div>
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
               {showContinueButton ? (
                 <div className="mt-4 shrink-0">
                   <button
                     type="button"
                     onClick={() => navigate('/roadmap', { replace: true })}
-                    className="w-full bg-gradient-to-r from-primary to-primary-light text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all"
+                    className="w-full bg-primary hover:bg-emerald-700 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all duration-300 transform hover:scale-[1.02]"
                   >
-                    Continue to GLP
+                    Continue to GLP →
                   </button>
                 </div>
               ) : (
                 <form onSubmit={handleChatSubmit} className="mt-4 shrink-0">
                   <div className="flex gap-3">
                     <input
+                      ref={inputRef}
                       type="text"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       placeholder="Tell me about yourself..."
                       disabled={loading}
+                      autoFocus
                       className="flex-1 px-4 py-3 rounded-2xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:border-primary focus:outline-none disabled:opacity-60"
                     />
                     <button
