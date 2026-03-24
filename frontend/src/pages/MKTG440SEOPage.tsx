@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import AppLayout from '../components/AppLayout'
 
-export default function CS101VariablesPage() {
+export default function MKTG440SEOPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chatInput, setChatInput] = useState('')
@@ -12,18 +12,19 @@ export default function CS101VariablesPage() {
       onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       settingsOpen={settingsOpen}
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
-      title="Variables and Data Types"
-      description="Learn how Python stores and uses different types of data."
+      title="SEO Basics"
+      description="Master search engine optimization and content discovery."
     >
       <div className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-12 py-6 sm:py-8 pb-48 min-w-0">
         <div className="space-y-8">
           <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 border-amber-200/80 dark:border-amber-800/40 shadow-soft">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-3">
-              What are Variables?
+              What is SEO?
             </h3>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-              Think of variables as labeled containers that store information. In Python, you can store numbers, text,
-              true/false values, and more. The variable name is the label, and the data inside is the value.
+              Search Engine Optimization (SEO) is the practice of optimizing your content to appear higher in search
+              engine results. It's about making your website more discoverable when people search for topics related to
+              your business.
             </p>
           </section>
 
@@ -32,68 +33,70 @@ export default function CS101VariablesPage() {
               Why this matters to you
             </h3>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-              Every program you write will use variables. Whether you're building a game, analyzing data, or creating a
-              website, understanding how to store and manipulate data is fundamental to programming.
+              Over 90% of online experiences begin with a search engine. If your content doesn't appear in the first
+              page of results, you're missing out on potential customers. Good SEO is the difference between being found
+              or being invisible online.
             </p>
           </section>
 
           <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 border-emerald-200/80 dark:border-emerald-800/40 shadow-soft">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-4">
-              Common Data Types
+              Key SEO Components
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-4 border border-emerald-200/60 dark:border-emerald-700/40">
-                <span className="material-symbols-outlined text-primary text-2xl mb-2">tag</span>
-                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Integers (int)</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                  Whole numbers without decimals.
+                <span className="material-symbols-outlined text-primary text-2xl mb-2">search</span>
+                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Keywords</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Words and phrases people search for to find content like yours.
                 </p>
-                <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">age = 25</code>
               </div>
               <div className="rounded-xl bg-blue-50 dark:bg-blue-900/20 p-4 border border-blue-200/60 dark:border-blue-700/40">
                 <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-2xl mb-2">
-                  format_quote
+                  article
                 </span>
-                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Strings (str)</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                  Text enclosed in quotes.
+                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Content Quality</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Well-written, relevant content that answers user questions.
                 </p>
-                <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">name = "Alice"</code>
               </div>
               <div className="rounded-xl bg-purple-50 dark:bg-purple-900/20 p-4 border border-purple-200/60 dark:border-purple-700/40">
                 <span className="material-symbols-outlined text-purple-600 dark:text-purple-400 text-2xl mb-2">
-                  toggle_on
+                  link
                 </span>
-                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Booleans (bool)</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                  True or False values.
+                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Backlinks</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Links from other reputable websites pointing to yours.
                 </p>
-                <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">is_student = True</code>
               </div>
             </div>
           </section>
 
           <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 overflow-hidden border-2 border-amber-200/80 dark:border-amber-800/40 shadow-soft">
-            <div className="h-24 bg-emerald-100 dark:bg-emerald-900/30" />
+            <div className="h-24 bg-amber-100 dark:bg-amber-900/30" />
             <div className="p-6">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-3">
-                Real Example: Simple Calculator
+                Real Example: Local Coffee Shop
               </h3>
-              <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-                Let's see variables in action with a simple calculation:
+              <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                A local coffee shop wanted to attract more customers. By optimizing their website with keywords like
+                "best coffee in [city name]" and "artisan coffee shop near me," they improved their ranking from page 5
+                to page 1 of Google results. Within 3 months, their foot traffic increased by{' '}
+                <strong className="text-slate-900 dark:text-white">40%</strong>.
               </p>
-              <div className="rounded-xl bg-slate-900 dark:bg-slate-950 p-4 mb-4">
-                <pre className="text-sm text-green-400 font-mono">
-                  <code>{`price = 50.99
-quantity = 3
-total = price * quantity
-print(f"Total: \${total}")  # Output: Total: $152.97`}</code>
-                </pre>
+              <div className="flex flex-wrap items-center gap-2 text-lg">
+                <span className="inline-flex items-center rounded-full bg-primary px-4 py-2 text-sm font-bold text-white">
+                  Keyword Research
+                </span>
+                <span className="text-slate-500">+</span>
+                <span className="inline-flex items-center rounded-full bg-slate-200 dark:bg-slate-600 px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-200">
+                  Quality Content
+                </span>
+                <span className="text-slate-500">=</span>
+                <span className="inline-flex items-center rounded-full bg-primary-light px-4 py-2 text-sm font-bold text-white">
+                  Higher Rankings
+                </span>
               </div>
-              <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                Here we stored numbers in variables, performed a calculation, and displayed the result. Python automatically
-                figured out the data types based on what we stored.
-              </p>
             </div>
           </section>
 
@@ -103,15 +106,15 @@ print(f"Total: \${total}")  # Output: Total: $152.97`}</code>
               Try it yourself
             </h3>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-2">
-              Create three variables:
+              Imagine you're launching a new fitness app. Think about:
             </p>
             <ul className="list-disc list-inside text-slate-600 dark:text-slate-300 mb-4 space-y-1">
-              <li>A string variable called <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">greeting</code> with the value "Hello"</li>
-              <li>An integer variable called <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">year</code> with the value 2024</li>
-              <li>A boolean variable called <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">is_learning</code> with the value True</li>
+              <li>What keywords would your target users search for?</li>
+              <li>What questions do beginners ask about fitness?</li>
+              <li>How can you create content that answers those questions?</li>
             </ul>
             <p className="text-slate-600 dark:text-slate-300 pb-2">
-              What would happen if you tried to add <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">greeting + year</code>? Ask in the chat below!
+              Need help brainstorming SEO strategies? Ask in the chat below!
             </p>
           </section>
           <div aria-hidden="true" className="shrink-0" style={{ height: '100px' }} />

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import AppLayout from '../components/AppLayout'
 
-export default function CS101VariablesPage() {
+export default function HIST102IndustrialPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chatInput, setChatInput] = useState('')
@@ -12,18 +12,19 @@ export default function CS101VariablesPage() {
       onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       settingsOpen={settingsOpen}
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
-      title="Variables and Data Types"
-      description="Learn how Python stores and uses different types of data."
+      title="The Industrial Revolution"
+      description="The transformation of society through industrialization."
     >
       <div className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-12 py-6 sm:py-8 pb-48 min-w-0">
         <div className="space-y-8">
           <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 border-amber-200/80 dark:border-amber-800/40 shadow-soft">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-3">
-              What are Variables?
+              What was the Industrial Revolution?
             </h3>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-              Think of variables as labeled containers that store information. In Python, you can store numbers, text,
-              true/false values, and more. The variable name is the label, and the data inside is the value.
+              The Industrial Revolution (roughly 1760-1840) was a period of massive technological, economic, and social
+              change. It marked the shift from hand production to machine manufacturing, from rural agrarian societies to
+              urban industrial ones.
             </p>
           </section>
 
@@ -32,68 +33,76 @@ export default function CS101VariablesPage() {
               Why this matters to you
             </h3>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-              Every program you write will use variables. Whether you're building a game, analyzing data, or creating a
-              website, understanding how to store and manipulate data is fundamental to programming.
+              The Industrial Revolution shaped the modern world we live in today. It created the foundations for modern
+              capitalism, urbanization, and technological progress. Understanding this period helps explain current
+              economic systems, labor rights, and social structures.
             </p>
           </section>
 
           <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 border-emerald-200/80 dark:border-emerald-800/40 shadow-soft">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-4">
-              Common Data Types
+              Key Innovations
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-4 border border-emerald-200/60 dark:border-emerald-700/40">
-                <span className="material-symbols-outlined text-primary text-2xl mb-2">tag</span>
-                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Integers (int)</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                  Whole numbers without decimals.
+                <span className="material-symbols-outlined text-primary text-2xl mb-2">settings</span>
+                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Steam Engine</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Powered factories, trains, and ships - revolutionizing transportation and production.
                 </p>
-                <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">age = 25</code>
               </div>
               <div className="rounded-xl bg-blue-50 dark:bg-blue-900/20 p-4 border border-blue-200/60 dark:border-blue-700/40">
                 <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-2xl mb-2">
-                  format_quote
+                  factory
                 </span>
-                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Strings (str)</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                  Text enclosed in quotes.
+                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Factory System</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Centralized production replaced cottage industries and home-based work.
                 </p>
-                <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">name = "Alice"</code>
               </div>
               <div className="rounded-xl bg-purple-50 dark:bg-purple-900/20 p-4 border border-purple-200/60 dark:border-purple-700/40">
                 <span className="material-symbols-outlined text-purple-600 dark:text-purple-400 text-2xl mb-2">
-                  toggle_on
+                  train
                 </span>
-                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Booleans (bool)</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                  True or False values.
+                <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Railroad Network</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Connected cities and enabled mass movement of goods and people.
                 </p>
-                <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">is_student = True</code>
               </div>
             </div>
           </section>
 
           <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 overflow-hidden border-2 border-amber-200/80 dark:border-amber-800/40 shadow-soft">
-            <div className="h-24 bg-emerald-100 dark:bg-emerald-900/30" />
+            <div className="h-24 bg-slate-600 dark:bg-slate-700/30" />
             <div className="p-6">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-3">
-                Real Example: Simple Calculator
+                Real Example: Manchester, England
               </h3>
-              <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-                Let's see variables in action with a simple calculation:
+              <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                Manchester transformed from a small market town of about{' '}
+                <strong className="text-slate-900 dark:text-white">25,000</strong> people in 1772 to a major industrial
+                city of over <strong className="text-slate-900 dark:text-white">300,000</strong> by 1850. It became known
+                as "Cottonopolis" due to its massive cotton textile industry. However, this rapid growth came with
+                significant challenges: overcrowded housing, pollution, poor sanitation, and harsh working conditions.
               </p>
-              <div className="rounded-xl bg-slate-900 dark:bg-slate-950 p-4 mb-4">
-                <pre className="text-sm text-green-400 font-mono">
-                  <code>{`price = 50.99
-quantity = 3
-total = price * quantity
-print(f"Total: \${total}")  # Output: Total: $152.97`}</code>
-                </pre>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-4 border border-emerald-200/60 dark:border-emerald-700/40">
+                  <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Positive Impacts</h4>
+                  <ul className="text-xs text-slate-600 dark:text-slate-400 list-disc list-inside space-y-1">
+                    <li>Increased production and wealth</li>
+                    <li>New job opportunities</li>
+                    <li>Technological advancement</li>
+                  </ul>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 border border-slate-200 dark:border-slate-600">
+                  <h4 className="font-bold text-slate-900 dark:text-white text-sm mb-1">Negative Impacts</h4>
+                  <ul className="text-xs text-slate-600 dark:text-slate-400 list-disc list-inside space-y-1">
+                    <li>Poor working conditions</li>
+                    <li>Child labor exploitation</li>
+                    <li>Environmental pollution</li>
+                  </ul>
+                </div>
               </div>
-              <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                Here we stored numbers in variables, performed a calculation, and displayed the result. Python automatically
-                figured out the data types based on what we stored.
-              </p>
             </div>
           </section>
 
@@ -103,15 +112,16 @@ print(f"Total: \${total}")  # Output: Total: $152.97`}</code>
               Try it yourself
             </h3>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-2">
-              Create three variables:
+              Consider this scenario: You're a factory owner in 1830s England. Your competitors are adopting steam-powered
+              machinery.
             </p>
             <ul className="list-disc list-inside text-slate-600 dark:text-slate-300 mb-4 space-y-1">
-              <li>A string variable called <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">greeting</code> with the value "Hello"</li>
-              <li>An integer variable called <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">year</code> with the value 2024</li>
-              <li>A boolean variable called <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">is_learning</code> with the value True</li>
+              <li>What economic pressures would you face?</li>
+              <li>How would adopting new technology affect your workers?</li>
+              <li>What social responsibilities, if any, do you have?</li>
             </ul>
             <p className="text-slate-600 dark:text-slate-300 pb-2">
-              What would happen if you tried to add <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">greeting + year</code>? Ask in the chat below!
+              Discuss the ethical dilemmas of industrialization in the chat below!
             </p>
           </section>
           <div aria-hidden="true" className="shrink-0" style={{ height: '100px' }} />

@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 
 export default function IncomeStatementPage() {
-  const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chatInput, setChatInput] = useState('')
@@ -137,21 +135,12 @@ export default function IncomeStatementPage() {
               placeholder="Ask a question..."
               className="flex-1 min-w-0 px-4 py-2.5 sm:py-3 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:border-primary focus:outline-none text-sm"
             />
-            <div className="flex gap-2 shrink-0 flex-wrap">
-              <button
-                type="button"
-                className="rounded-xl bg-primary px-4 sm:px-6 py-2.5 sm:py-3 text-sm font-bold text-white hover:bg-primary-light transition-colors whitespace-nowrap"
-              >
-                Ask
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/roadmap')}
-                className="rounded-xl border-2 border-primary/30 px-4 sm:px-5 py-2.5 sm:py-3 text-sm font-bold text-primary hover:bg-primary/10 dark:hover:bg-primary/20 transition-colors whitespace-nowrap"
-              >
-                I'm done for today
-              </button>
-            </div>
+            <button
+              type="button"
+              className="rounded-xl bg-primary px-4 sm:px-6 py-2.5 sm:py-3 text-sm font-bold text-white hover:bg-primary-light transition-colors whitespace-nowrap"
+            >
+              Ask
+            </button>
           </div>
         </div>
       </div>
