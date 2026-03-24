@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pinecone import Pinecone, FetchResponse
 from typing import Iterable, List, Optional, Tuple, Any
-from models.chunks import CourseChunk, ChunkMetadata
+from .models.chunks import CourseChunk, ChunkMetadata
 
 
 class PineconeClient:

@@ -2,11 +2,7 @@ document
    ↓
 extract text 
    ↓
-split by headings/slides or semantic split (can be decided later)
-   ↓
-enforce max chunk size
-   ↓
-form chunk 
+semantic chunking 
    ↓
 generate embedding
    ↓

@@ -1,0 +1,407 @@
+[
+  {
+    "text": "Statement of Work (SOW)",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<h1 class=\"Title\">Statement of Work (SOW)</h1>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Project Title: Canvas API",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<p class=\"Paragraph\"><span class=\"UncategorizedText\">Project Title:</span><p class=\"Paragraph\">Canvas API</p></p>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Prepared For: Gies College of Business \u2013 Educational Portfolio Management & Teaching & Learning Teams",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<p class=\"Paragraph\"><span class=\"UncategorizedText\">Prepared For:</span><p class=\"Paragraph\">Gies College of Business \u2013 Educational Portfolio Management & Teaching & Learning Teams</p></p>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Prepared By: Gies Disruption Lab",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<p class=\"Paragraph\"><span class=\"UncategorizedText\">Prepared By:</span><p class=\"Paragraph\">Gies Disruption Lab</p></p>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Date: 01/19/2025",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<p class=\"Paragraph\"><span class=\"UncategorizedText\">Date:</span><time class=\"Time\">01/19/2025</time></p>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Delivery Timeline: 12 Weeks",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<p class=\"Paragraph\"><span class=\"UncategorizedText\">Delivery Timeline:</span><p class=\"Paragraph\">12 Weeks</p></p>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "1. Project Overview",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<h1 class=\"Heading\">1. Project Overview</h1>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "This project combines curriculum intelligence and personalized learning into a single AI-powered platform that serves both faculty and students. Leveraging the Canvas API as the primary academic data source, the platform will analyze course content, assignments, files, and learning materials to help faculty understand what skills and topics are taught across courses and identify gaps in education that could be useful in the workforce. The result will be a proof-of-concept system demonstrating how generative AI can support curriculum planning and individualized learning within Gies and UIUC.",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<p class=\"NarrativeText\">This project combines curriculum intelligence and personalized learning into a single AI-powered platform that serves both faculty and students. Leveraging the Canvas API as the primary academic data source, the platform will analyze course content, assignments, files, and learning materials to help faculty understand what skills and topics are taught across courses and identify gaps in education that could be useful in the workforce. The result will be a proof-of-concept system demonstrating how generative AI can support curriculum planning and individualized learning within Gies and UIUC.</p>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "2. Objectives",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<h1 class=\"Heading\">2. Objectives</h1>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Enable AI-powered discovery and analysis of Canvas course content across UIUC colleges Map courses and materials to skill frameworks that are well-defined Identify gaps in curriculum and any opportunities for improvement relative to job and skill requirements Demonstrate personalized learning at scale by tailoring content recommendations to individual students Deliver a unified platform with distinct student and faculty experiences built on shared data and AI infrastructure",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<ul class=\"UnorderedList\"><li class=\"ListItem\">Enable AI-powered discovery and analysis of Canvas course content across UIUC colleges</li><li class=\"ListItem\">Map courses and materials to skill frameworks that are well-defined</li><li class=\"ListItem\">Identify gaps in curriculum and any opportunities for improvement relative to job and skill requirements</li><li class=\"ListItem\">Demonstrate personalized learning at scale by tailoring content recommendations to individual students</li><li class=\"ListItem\">Deliver a unified platform with distinct student and faculty experiences built on shared data and AI infrastructure</li></ul>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "3. Scope of Work",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 1,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<h1 class=\"Heading\">3. Scope of Work</h1>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Canvas Data Ingestion & Indexing: Integrate with the Canvas API to process course metadata, syllabi, assignments, modules, and file contents across selected UIUC colleges. Semantic Search & AI Interpretation: Use generative AI to semantically index course content, enabling concept and skill-based search beyond keyword matching. Role-Based Platform Architecture: Single web application with secure role-based access, routing users to Faculty or Student experiences after login. Curriculum Explorer: Organize and browse Canvas courses by UIUC college and department. Topic & Skill Discovery: Enable faculty to query what courses teach specific topics or skills using AI-powered search. Job & Skill Alignment Analysis: Allow faculty to select target job roles or industries and compare required skills against skills taught in selected courses. Gap Identification: Surface missing or underrepresented skills within courses or curricula relative to workforce needs. Course Improvement Insights (AI-Assisted): Generate recommendations on how courses could be enhanced to better align with desired skills (e.g., suggested topics, activities, or assignments).",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 2,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<ol class=\"OrderedList\"><li class=\"ListItem\"><span class=\"UncategorizedText\">Canvas Data Ingestion & Indexing:</span><p class=\"NarrativeText\">Integrate with the Canvas API to process course metadata, syllabi, assignments, modules, and file contents across selected UIUC colleges.</p></li><li class=\"ListItem\"><span class=\"UncategorizedText\">Semantic Search & AI Interpretation:</span><p class=\"NarrativeText\">Use generative AI to semantically index course content, enabling concept and skill-based search beyond keyword matching.</p></li><li class=\"ListItem\"><span class=\"UncategorizedText\">Role-Based Platform Architecture:</span><p class=\"NarrativeText\">Single web application with secure role-based access, routing users to Faculty or Student experiences after login.</p></li><li class=\"ListItem\"><span class=\"UncategorizedText\">Curriculum Explorer:</span><p class=\"NarrativeText\">Organize and browse Canvas courses by UIUC college and department.</p></li><li class=\"ListItem\"><span class=\"UncategorizedText\">Topic & Skill Discovery:</span><p class=\"NarrativeText\">Enable faculty to query what courses teach specific topics or skills using AI-powered search.</p></li><li class=\"ListItem\"><span class=\"UncategorizedText\">Job & Skill Alignment Analysis:</span><p class=\"NarrativeText\">Allow faculty to select target job roles or industries and compare required skills against skills taught in selected courses.</p></li><li class=\"ListItem\"><span class=\"UncategorizedText\">Gap Identification:</span><p class=\"NarrativeText\">Surface missing or underrepresented skills within courses or curricula relative to workforce needs.</p></li><li class=\"ListItem\"><span class=\"UncategorizedText\">Course Improvement Insights (AI-Assisted):</span><p class=\"NarrativeText\">Generate recommendations on how courses could be enhanced to better align with desired skills (e.g., suggested topics, activities, or assignments).</p></li></ol>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "4. Deliverables",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 2,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<h1 class=\"Heading\">4. Deliverables</h1>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Week 2: Requirements documentation, system architecture, Canvas data model, faculty personas, and skill framework definition Week 4: Canvas API ingestion pipeline, course and file content indexing, and semantic embedding generation Week 6: AI-powered course search, topic-to-skill mapping, and curriculum intelligence engine Week 8: Faculty dashboard for course discovery, skill coverage visualization, and gap identification Week 10: Job\u2013skill\u2013course comparison logic and AI-assisted course",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 2,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<ul class=\"UnorderedList\"><li class=\"ListItem\"><p class=\"NarrativeText\">Week 2: Requirements documentation, system architecture, Canvas data model, faculty personas, and skill framework definition</p></li><li class=\"ListItem\"><p class=\"NarrativeText\">Week 4: Canvas API ingestion pipeline, course and file content indexing, and semantic embedding generation</p></li><li class=\"ListItem\"><p class=\"NarrativeText\">Week 6: AI-powered course search, topic-to-skill mapping, and curriculum intelligence engine</p></li><li class=\"ListItem\"><p class=\"NarrativeText\">Week 8: Faculty dashboard for course discovery, skill coverage visualization, and gap identification</p></li><li class=\"ListItem\"><p class=\"NarrativeText\">Week 10: Job\u2013skill\u2013course comparison logic and AI-assisted course</p></li></ul>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "improvement recommendations Week 12: Validated faculty-facing workflows, documentation, and contribution to integrated MVP demo",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 3,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<ul class=\"UnorderedList\"><li class=\"ListItem\">improvement recommendations</li><li class=\"ListItem\"><mark class=\"Highlight\">Week 12:</mark><p class=\"Paragraph\">Validated faculty-facing workflows, documentation, and contribution to integrated MVP demo</p></li></ul>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "5. Project Timeline (12 Weeks)",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 3,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<h1 class=\"Heading\">5. Project Timeline (12 Weeks)</h1>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Week Milestone / Activity Deliverables 1\u20132 Planning & System Design Architecture design, Canvas data modeling, skill framework alignment 3\u20134 Data Ingestion & Policy Foundation Canvas API integration, content ingestion, semantic indexing 5\u20136 Curriculum Intelligence AI search, skill extraction, curriculum intelligence engine 7\u20138 Dashboard Development Faculty dashboard, gap analysis UX 9-10 Alignment Analysis Job\u2013skill alignment, course improvement insights 11 QA & Refinement QA, validation with sample courses, stakeholder feedback",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 3,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<table class=\"Table\"><thead><tr><th>Week</th><th>Milestone / Activity</th><th>Deliverables</th></tr></thead><tbody><tr><td>1\u20132</td><td>Planning &amp; System Design</td><td>Architecture design, Canvas data modeling, skill framework alignment</td></tr><tr><td>3\u20134</td><td>Data Ingestion &amp; Policy Foundation</td><td>Canvas API integration, content ingestion, semantic indexing</td></tr><tr><td>5\u20136</td><td>Curriculum Intelligence</td><td>AI search, skill extraction, curriculum intelligence engine</td></tr><tr><td>7\u20138</td><td>Dashboard Development</td><td>Faculty dashboard, gap analysis UX</td></tr><tr><td>9-10</td><td>Alignment Analysis</td><td>Job\u2013skill alignment, course improvement insights</td></tr><tr><td>11</td><td>QA &amp; Refinement</td><td>QA, validation with sample courses, stakeholder feedback</td></tr></tbody></table>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Week Milestone / Activity Deliverables 12 Final Delivery Functional MVP & documentation",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 4,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<table class=\"Table\"><thead><tr><th>Week</th><th>Milestone / Activity</th><th>Deliverables</th></tr></thead><tbody><tr><td>12</td><td>Final Delivery</td><td>Functional MVP &amp; documentation</td></tr></tbody></table>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "6. Success Criteria",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 4,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<h6 class=\"Heading\">6. Success Criteria</h6>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Professors are able to log into the platform without authentication or user errors Canvas course content is successfully ingested and searchable across selected UIUC colleges using AI-powered semantic search Faculty can clearly identify skill coverage, gaps, and alignment between courses and workforce needs AI-generated insights and recommendations are interpretable, actionable, and aligned with stakeholder expectations MVP delivered in 12 weeks, ready for pilot testing with founders.",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 4,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<ul class=\"UnorderedList\"><li class=\"ListItem\">Professors are able to log into the platform without authentication or user errors</li><li class=\"ListItem\">Canvas course content is successfully ingested and searchable across selected UIUC colleges using AI-powered semantic search</li><li class=\"ListItem\">Faculty can clearly identify skill coverage, gaps, and alignment between courses and workforce needs</li><li class=\"ListItem\">AI-generated insights and recommendations are interpretable, actionable, and aligned with stakeholder expectations</li><li class=\"ListItem\">MVP delivered in 12 weeks, ready for pilot testing with founders.</li></ul>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "7. Assumptions & Dependencies",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 4,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<h6 class=\"Heading\">7. Assumptions & Dependencies</h6>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Canvas API access is approved and provides sufficient permissions for course metadata, modules, assignments, and file contents Teaching & Learning partners are available to advise on learning science and personalization best practices Generative AI and cloud infrastructure (e.g., AWS, Azure, or GCP) are available for semantic search and content generation",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 4,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<ul class=\"UnorderedList\"><li class=\"ListItem\">Canvas API access is approved and provides sufficient permissions for course metadata, modules, assignments, and file contents</li><li class=\"ListItem\">Teaching & Learning partners are available to advise on learning science and personalization best practices</li><li class=\"ListItem\">Generative AI and cloud infrastructure (e.g., AWS, Azure, or GCP) are available for semantic search and content generation</li></ul>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "8. Roles & Responsibilities",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 4,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<h6 class=\"Heading\">8. Roles & Responsibilities</h6>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Project Lead (PM/TL): Provide oversight, user input, and pilot",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 4,
+      "parent_id": "1c20fd40b567c8d6934c3023f857f967",
+      "text_as_html": "<ul class=\"UnorderedList\"><li class=\"ListItem\"><span class=\"UncategorizedText\">Project Lead (PM/TL):</span><p class=\"Paragraph\">Provide oversight, user input, and pilot</p></li></ul>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "participants. Backend Development Team: Responsible for platform architecture, data pipelines, AI integration, and core application logic Platform & Faculty Intelligence: Canvas API ingestion, semantic indexing, skill mapping, curriculum intelligence features, and faculty-facing workflows student-facing workflows UX/UI Designers (SWEs): Designs and implements a unified web interface supporting both faculty and student experiences, with shared components and role-specific functionality",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 5,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<ul class=\"UnorderedList\"><li class=\"ListItem\">participants.</li><li class=\"ListItem\"><span class=\"UncategorizedText\">Backend Development Team:</span><p class=\"Paragraph\">Responsible for platform architecture, data pipelines, AI integration, and core application logic</p><ul class=\"UnorderedList\"><li class=\"ListItem\"><span class=\"UncategorizedText\">Platform & Faculty Intelligence:</span><p class=\"Paragraph\">Canvas API ingestion, semantic indexing, skill mapping, curriculum intelligence features, and faculty-facing workflows student-facing workflows</p></li></ul></li><li class=\"ListItem\"><span class=\"UncategorizedText\">UX/UI Designers (SWEs):</span><p class=\"Paragraph\">Designs and implements a unified web interface supporting both faculty and student experiences, with shared components and role-specific functionality</p></li></ul>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "9. Deliverable Acceptance",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 5,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<h1 class=\"Heading\">9. Deliverable Acceptance</h1>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  },
+  {
+    "text": "Deliverables will be reviewed at each milestone by the Project Leads and SLT. Acceptance will be based on meeting functional requirements, usability standards, client satisfaction, and integration with the overall platform vision.",
+    "metadata": {
+      "category_depth": 1,
+      "page_number": 5,
+      "parent_id": "6b37173e9c5180e77bfe620773f2ef81",
+      "text_as_html": "<p class=\"NarrativeText\">Deliverables will be reviewed at each milestone by the Project Leads and SLT. Acceptance will be based on meeting functional requirements, usability standards, client satisfaction, and integration with the overall platform vision.</p>",
+      "languages": [
+        "eng"
+      ],
+      "filetype": "application/pdf",
+      "partitioner_type": "vlm_partition",
+      "filename": "canvas_api_sow.pdf"
+    }
+  }
+]
