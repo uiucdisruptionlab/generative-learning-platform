@@ -1,9 +1,9 @@
 import os
 import json
 import boto3
+from dotenv import load_dotenv
 
-# If you already set the API key as an environment variable, you can comment this line out
-os.environ['AWS_BEARER_TOKEN_BEDROCK'] = "API KEY"
+load_dotenv()  # Loads AWS_BEARER_TOKEN_BEDROCK from .env in project root
 
 # Create an Amazon Bedrock client
 client = boto3.client(
