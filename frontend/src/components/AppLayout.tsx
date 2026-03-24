@@ -75,6 +75,17 @@ export default function AppLayout({
               <span className="material-symbols-outlined group-hover:text-primary transition-colors">book</span>
               <span className="text-sm font-semibold">My Courses</span>
             </Link>
+            <Link
+              to="/profile"
+              className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
+                location.pathname === '/profile'
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              <span className="material-symbols-outlined group-hover:text-primary transition-colors">person</span>
+              <span className="text-sm font-semibold">Profile</span>
+            </Link>
           </nav>
         </div>
         <div className="mt-auto p-8 pt-0 border-t border-slate-100 dark:border-slate-800">
