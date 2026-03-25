@@ -3,55 +3,54 @@ export type OnboardingMessage = {
   content: string
 }
 
-export type QuizAnswers = Record<string, string>
-
-export type OnboardingResponse = {
-  message: string
-  options?: string[]
-  done?: boolean
+export type OnboardingProfile = {
+  name: string | null
+  major: string | null
+  minor: string | null
+  career_goals: string | null
+  career_clarity: string | null
+  subject_confidence: string | null
+  learning_style_summary: string | null
+  interests: string[] | null
+  notes: string | null
 }
 
-/**
- * Mock onboarding chat API. Simulates multi-turn conversation
- * to collect name, major, career goals, and prior knowledge.
- * Returns done: true after a few exchanges.
- */
+export type ChatResponse = {
+  message: string
+  profile: OnboardingProfile
+  done: boolean
+}
+
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
+export function emptyProfile(): OnboardingProfile {
+  return {
+    name: null,
+    major: null,
+    minor: null,
+    career_goals: null,
+    career_clarity: null,
+    subject_confidence: null,
+    learning_style_summary: null,
+    interests: null,
+    notes: null,
+  }
+}
+
 export async function sendMessage(
   messages: OnboardingMessage[],
-  quizAnswers: QuizAnswers
-): Promise<OnboardingResponse> {
-  // Simulate network delay
-  await new Promise((r) => setTimeout(r, 600))
+  profile: OnboardingProfile,
+): Promise<ChatResponse> {
+  const res = await fetch(`${API_URL}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, profile }),
+  })
 
-  const messageCount = messages.length
+  if (!res.ok) {
+    const detail = await res.text()
+    throw new Error(`Backend error ${res.status}: ${detail}`)
+  }
 
-  // Simple mock: respond based on turn count and user input
-  if (messageCount === 0) {
-    return {
-      message: "Hello! What's your name?",
-    }
-  }
-  if (messageCount === 2) {
-    const name = messages[messages.length - 1]?.content || 'there'
-    return {
-      message: `Nice to meet you, ${name}! What's your major or area of study?`,
-    }
-  }
-  if (messageCount === 4) {
-    return {
-      message:
-        "Thanks! What are your main career goals? What kind of work do you see yourself doing?",
-    }
-  }
-  if (messageCount === 6) {
-    return {
-      message:
-        "One more thing: what's your prior experience with this subject? Are you new to it or do you have some background?",
-    }
-  }
-  // messageCount >= 8: user just answered prior experience
-  return {
-    message: "Thanks, that's all I needed!",
-    done: true,
-  }
+  return res.json() as Promise<ChatResponse>
 }
