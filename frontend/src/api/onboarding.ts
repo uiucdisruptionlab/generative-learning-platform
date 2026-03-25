@@ -1,57 +1,49 @@
-export type OnboardingMessage = {
-  role: 'user' | 'assistant'
-  content: string
+export interface OnboardingMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
-export type QuizAnswers = Record<string, string>
-
-export type OnboardingResponse = {
-  message: string
-  options?: string[]
-  done?: boolean
+export interface OnboardingResponse {
+  message: string;  // Maps to backend 'reply'
+  done: boolean;     // Maps to backend 'is_onboarding_complete'
+  updates?: Record<string, any>;
 }
 
-/**
- * Mock onboarding chat API. Simulates multi-turn conversation
- * to collect name, major, career goals, and prior knowledge.
- * Returns done: true after a few exchanges.
- */
 export async function sendMessage(
   messages: OnboardingMessage[],
-  quizAnswers: QuizAnswers
+  _quizAnswers: any 
 ): Promise<OnboardingResponse> {
-  // Simulate network delay
-  await new Promise((r) => setTimeout(r, 600))
+  try {
+    // Bedrock fails on empty strings, so we ensure a default "Hello"
+    const lastContent = messages.length > 0 ? messages[messages.length - 1].content.trim() : "";
+    const messageToSend = lastContent || "Hello";
 
-  const messageCount = messages.length
+    const response = await fetch("http://127.0.0.1:8000/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        message: messageToSend,
+        history: messages.slice(0, -1),
+      }),
+    });
 
-  // Simple mock: respond based on turn count and user input
-  if (messageCount === 0) {
-    return {
-      message: "Hello! What's your name?",
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Server error");
     }
-  }
-  if (messageCount === 2) {
-    const name = messages[messages.length - 1]?.content || 'there'
+
+    const data = await response.json();
+
     return {
-      message: `Nice to meet you, ${name}! What's your major or area of study?`,
-    }
-  }
-  if (messageCount === 4) {
+      message: data.reply,
+      done: data.is_onboarding_complete,
+      updates: data.updates
+    };
+  } catch (error) {
+    console.error("Connection Error:", error);
     return {
-      message:
-        "Thanks! What are your main career goals? What kind of work do you see yourself doing?",
-    }
-  }
-  if (messageCount === 6) {
-    return {
-      message:
-        "One more thing: what's your prior experience with this subject? Are you new to it or do you have some background?",
-    }
-  }
-  // messageCount >= 8: user just answered prior experience
-  return {
-    message: "Thanks, that's all I needed!",
-    done: true,
+      message: "I'm having a bit of trouble connecting to my brain. Is the backend running?",
+      done: false
+    };
   }
 }

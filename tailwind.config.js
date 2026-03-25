@@ -1,19 +1,20 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  // CRITICAL: This tells Tailwind to look inside the frontend folder
   content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
+    "./frontend/index.html",
+    "./frontend/src/**/*.{js,ts,jsx,tsx}",
   ],
   darkMode: "class",
   theme: {
     extend: {
       colors: {
-        primary: "#2c5926",
-        forest: "#2c5926",
+        "primary": "#2c5926",
+        "forest": "#2c5926",
         "canvas-green": "#287D3C",
         "educational-teal": "#009688",
-        secondary: "#f59e0b",
-        accent: "#c2410c",
+        "secondary": "#f59e0b",
+        "accent": "#c2410c",
         "burnt-orange": "#cc5500",
         "warm-yellow": "#f4a900",
         "soft-teal": "#E0F2F1",

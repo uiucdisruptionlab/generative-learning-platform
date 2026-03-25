@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { sendMessage, type OnboardingMessage } from '../api/onboarding'
 
 export default function OnboardingPage() {
+  const [userProfile, setUserProfile] = useState<any>({})
   const navigate = useNavigate()
   const [messages, setMessages] = useState<OnboardingMessage[]>([])
   const [input, setInput] = useState('')
@@ -19,16 +20,25 @@ export default function OnboardingPage() {
     setMessages(nextMessages)
     setInput('')
     setLoading(true)
-
     try {
       const res = await sendMessage(nextMessages, {})
+  
+      // 1. Update the Chat UI (What the user sees)
       setMessages((m) => [...m, { role: 'assistant', content: res.message }])
+  
+      // 2. Update the Profile (What the system knows)
+      if (res.updates) {
+        setUserProfile((prev: any) => ({ ...prev, ...res.updates }))
+        console.log("Current Profile State:", { ...userProfile, ...res.updates }) 
+      }
+
       if (res.done) {
         setShowContinueButton(true)
       }
     } finally {
       setLoading(false)
     }
+
   }
 
   useEffect(() => {
@@ -38,6 +48,7 @@ export default function OnboardingPage() {
     sendMessage([], {}).then((res) => {
       if (!cancelled) {
         setMessages([{ role: 'assistant', content: res.message }])
+        if (res.updates) setUserProfile(res.updates)
       }
     }).finally(() => {
       if (!cancelled) setLoading(false)

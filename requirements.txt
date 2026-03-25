@@ -1,0 +1,6 @@
+boto3>=1.35.0
+pinecone>=5.0.0
+os
+fastapi>= 0.135.2
+antropic>=  0.86.0
+uvicorn>=  0.42.0
