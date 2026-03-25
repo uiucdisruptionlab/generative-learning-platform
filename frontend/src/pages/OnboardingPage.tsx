@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { sendMessage, emptyProfile, type OnboardingMessage, type OnboardingProfile } from '../api/onboarding'
+import { streamMessage, emptyProfile, type OnboardingMessage, type OnboardingProfile } from '../api/onboarding'
 import LearnerProfileCard, { type LearnerProfile } from '../components/LearnerProfileCard'
 
 function titleCase(val: string): string {
@@ -45,23 +45,35 @@ export default function OnboardingPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch opening greeting on mount
+  // Fetch opening greeting on mount via streaming
   useEffect(() => {
     if (messages.length > 0 || loading) return
     let cancelled = false
     setLoading(true)
-    sendMessage([], emptyProfile())
-      .then((res) => {
-        if (!cancelled) {
-          setMessages([{ role: 'assistant', content: res.message }])
+
+    ;(async () => {
+      try {
+        // seed an empty assistant bubble
+        setMessages([{ role: 'assistant', content: '' }])
+        for await (const event of streamMessage([], emptyProfile())) {
+          if (cancelled) break
+          if (event.type === 'chunk') {
+            setMessages((m) => {
+              const updated = [...m]
+              updated[updated.length - 1] = { role: 'assistant', content: updated[updated.length - 1].content + event.text }
+              return updated
+            })
+          } else if (event.type === 'result') {
+            setMessages([{ role: 'assistant', content: event.message }])
+          }
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) setError(String(err))
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false)
-      })
+      }
+    })()
+
     return () => { cancelled = true }
   }, [])
 
@@ -86,11 +98,31 @@ export default function OnboardingPage() {
     setError(null)
 
     try {
-      const res = await sendMessage(nextMessages, profile)
-      setMessages((m) => [...m, { role: 'assistant', content: res.message }])
-      setProfile(res.profile)
-      if (res.done) {
-        setDoneProfile(res.profile)
+      // Seed an empty assistant bubble that we'll fill as chunks arrive
+      setMessages((m) => [...m, { role: 'assistant', content: '' }])
+
+      for await (const event of streamMessage(nextMessages, profile)) {
+        if (event.type === 'chunk') {
+          setMessages((m) => {
+            const updated = [...m]
+            updated[updated.length - 1] = {
+              role: 'assistant',
+              content: updated[updated.length - 1].content + event.text,
+            }
+            return updated
+          })
+        } else if (event.type === 'result') {
+          // Snap to the clean final text, then update profile state
+          setMessages((m) => {
+            const updated = [...m]
+            updated[updated.length - 1] = { role: 'assistant', content: event.message }
+            return updated
+          })
+          setProfile(event.profile)
+          if (event.done) setDoneProfile(event.profile)
+        } else if (event.type === 'error') {
+          setError(event.message)
+        }
       }
     } catch (err) {
       setError(String(err))
@@ -165,7 +197,7 @@ export default function OnboardingPage() {
 
             {(messages.length > 0 || loading) && (
               <>
-                <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+                <div className="flex-1 overflow-y-auto scrollbar-none space-y-4 pb-4">
                   {messages.map((m, i) => (
                     <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div
@@ -179,7 +211,7 @@ export default function OnboardingPage() {
                       </div>
                     </div>
                   ))}
-                  {loading && (
+                  {loading && messages[messages.length - 1]?.role === 'user' && (
                     <div className="flex justify-start">
                       <div className="bg-slate-100 dark:bg-slate-800 px-4 py-3 rounded-2xl text-slate-500">…</div>
                     </div>

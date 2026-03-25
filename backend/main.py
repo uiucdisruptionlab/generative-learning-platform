@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import boto3
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
@@ -226,21 +228,14 @@ def _parse_llm_json(text: str) -> Dict[str, Any]:
     return json.loads(cleaned)
 
 
-def call_bedrock(
-    profile: Dict[str, Any],
-    history: List[Dict[str, str]],
-    user_message: str,
-) -> Dict[str, Any]:
-    client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
-
-    prompt_payload = {
+def _bedrock_body(profile: Dict[str, Any], history: List[Dict[str, str]], user_message: str) -> str:
+    payload = {
         "profile": profile,
         "conversation_history": history,
         "latest_user_message": user_message,
         "required_fields": REQUIRED_FIELDS,
     }
-
-    body = {
+    return json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 700,
         "temperature": 0,
@@ -248,31 +243,69 @@ def call_bedrock(
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(prompt_payload, ensure_ascii=False, indent=2),
-                    }
-                ],
+                "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, indent=2)}],
             }
         ],
-    }
+    })
 
-    response = client.invoke_model(
+
+def call_bedrock_stream(
+    profile: Dict[str, Any],
+    history: List[Dict[str, str]],
+    user_message: str,
+) -> str:
+    """Call Bedrock with streaming and return the fully accumulated response text."""
+    client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    response = client.invoke_model_with_response_stream(
         modelId=MODEL_ID,
-        body=json.dumps(body),
+        body=_bedrock_body(profile, history, user_message),
         contentType="application/json",
         accept="application/json",
     )
-    raw = response["body"].read().decode("utf-8")
-    parsed = json.loads(raw)
-    text = "".join(
-        block.get("text", "")
-        for block in parsed.get("content", [])
-        if block.get("type") == "text"
-    ).strip()
+    full_text = ""
+    for event in response["body"]:
+        chunk = event.get("chunk")
+        if not chunk:
+            continue
+        data = json.loads(chunk["bytes"].decode("utf-8"))
+        if data.get("type") == "content_block_delta":
+            delta = data.get("delta", {})
+            if delta.get("type") == "text_delta":
+                full_text += delta.get("text", "")
+    return full_text
 
-    return _parse_llm_json(text)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",  # disable Nginx buffering
+}
+
+
+def _sse(data: Any) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def _process_llm_response(
+    raw_text: str,
+    profile: Dict[str, Any],
+    latest_user_message: str,
+) -> tuple[str, Dict[str, Any], bool]:
+    llm_json = _parse_llm_json(raw_text)
+    extracted_updates = llm_json.get("extracted_updates") or {}
+    user_seems_finished = bool(llm_json.get("user_seems_finished")) or looks_like_done(
+        latest_user_message
+    )
+    assistant_reply = str(
+        llm_json.get("assistant_reply") or "Could you tell me a bit more?"
+    ).strip()
+    updated_profile = merge_profile(profile, extracted_updates)
+    missing = compute_missing_fields(updated_profile)
+    done = user_seems_finished and not missing
+    return assistant_reply, updated_profile, done
 
 
 # ---------------------------------------------------------------------------
@@ -284,47 +317,47 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest) -> StreamingResponse:
     messages = [m.model_dump() for m in req.messages]
     profile = req.profile
-
-    # Initial call — no user messages yet, return the opening greeting
     user_messages = [m for m in messages if m["role"] == "user"]
-    if not user_messages:
-        return ChatResponse(
-            message=OPENING_MESSAGE,
-            profile=profile,
-            done=False,
-        )
 
-    # Split history (everything before the latest user message) and latest message
-    latest_user_message = user_messages[-1]["content"]
-    # all but the last message (the one we're replying to)
-    history = messages[:-1]
+    async def generate() -> AsyncGenerator[str, None]:
+        # Opening greeting — no Bedrock call needed
+        if not user_messages:
+            for word in OPENING_MESSAGE.split():
+                yield _sse({"type": "chunk", "text": word + " "})
+                await asyncio.sleep(0.04)
+            yield _sse({"type": "result", "message": OPENING_MESSAGE, "profile": profile, "done": False})
+            return
 
-    try:
-        llm_json = call_bedrock(profile, history, latest_user_message)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Bedrock error: {exc}")
+        latest = user_messages[-1]["content"]
+        history = messages[:-1]
 
-    extracted_updates = llm_json.get("extracted_updates") or {}
-    user_seems_finished = bool(llm_json.get("user_seems_finished")) or looks_like_done(
-        latest_user_message
-    )
-    assistant_reply = str(
-        llm_json.get("assistant_reply") or "Could you tell me a bit more?"
-    ).strip()
+        # Run the blocking Bedrock call in a thread so we don't block the event loop
+        try:
+            raw_text = await asyncio.to_thread(call_bedrock_stream, profile, history, latest)
+        except Exception as exc:
+            yield _sse({"type": "error", "message": str(exc)})
+            return
 
-    updated_profile = merge_profile(profile, extracted_updates)
-    missing = compute_missing_fields(updated_profile)
-    done = user_seems_finished and not missing
+        try:
+            assistant_reply, updated_profile, done = _process_llm_response(raw_text, profile, latest)
+        except Exception as exc:
+            yield _sse({"type": "error", "message": f"Parse error: {exc}"})
+            return
 
-    return ChatResponse(
-        message=assistant_reply,
-        profile=updated_profile,
-        done=done,
-    )
+        # Stream the reply text word-by-word
+        words = assistant_reply.split()
+        for i, word in enumerate(words):
+            yield _sse({"type": "chunk", "text": word + (" " if i < len(words) - 1 else "")})
+            await asyncio.sleep(0.03)
+
+        # Final event carries the full profile and done flag
+        yield _sse({"type": "result", "message": assistant_reply, "profile": updated_profile, "done": done})
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,11 @@ export type ChatResponse = {
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
+export type StreamEvent =
+  | { type: 'chunk'; text: string }
+  | { type: 'result'; message: string; profile: OnboardingProfile; done: boolean }
+  | { type: 'error'; message: string }
+
 export function emptyProfile(): OnboardingProfile {
   return {
     name: null,
@@ -43,20 +48,38 @@ export function emptyProfile(): OnboardingProfile {
   }
 }
 
-export async function sendMessage(
+export async function* streamMessage(
   messages: OnboardingMessage[],
   profile: OnboardingProfile,
-): Promise<ChatResponse> {
-  const res = await fetch(`${API_URL}/chat`, {
+): AsyncGenerator<StreamEvent> {
+  const res = await fetch(`${API_URL}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, profile }),
   })
 
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     const detail = await res.text()
     throw new Error(`Backend error ${res.status}: ${detail}`)
   }
 
-  return res.json() as Promise<ChatResponse>
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const raw = line.slice(6).trim()
+        if (raw) yield JSON.parse(raw) as StreamEvent
+      }
+    }
+  }
 }
