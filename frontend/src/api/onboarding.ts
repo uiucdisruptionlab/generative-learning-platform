@@ -7,10 +7,13 @@ export type OnboardingProfile = {
   name: string | null
   major: string | null
   minor: string | null
+  academic_level: string | null
   career_goals: string | null
   career_clarity: string | null
   subject_confidence: string | null
   learning_style_summary: string | null
+  weekly_hours: number | null
+  preferred_formats: string[] | null
   interests: string[] | null
   notes: string | null
 }
@@ -28,10 +31,13 @@ export function emptyProfile(): OnboardingProfile {
     name: null,
     major: null,
     minor: null,
+    academic_level: null,
     career_goals: null,
     career_clarity: null,
     subject_confidence: null,
     learning_style_summary: null,
+    weekly_hours: null,
+    preferred_formats: null,
     interests: null,
     notes: null,
   }

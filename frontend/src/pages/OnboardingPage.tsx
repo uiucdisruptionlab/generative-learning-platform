@@ -3,14 +3,21 @@ import { useNavigate, Link } from 'react-router-dom'
 import { sendMessage, emptyProfile, type OnboardingMessage, type OnboardingProfile } from '../api/onboarding'
 import LearnerProfileCard, { type LearnerProfile } from '../components/LearnerProfileCard'
 
+function titleCase(val: string): string {
+  return val.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 function toDisplayProfile(p: OnboardingProfile): LearnerProfile {
   const now = new Date().toISOString()
+
+  // Build llm_profile with human-readable keys and formatted values.
+  // "Learning Style" is stored first so LearnerProfileCard can render it full-width.
   const llm: Record<string, string> = {}
-  if (p.learning_style_summary) llm['learning_style_summary'] = p.learning_style_summary
-  if (p.career_clarity) llm['career_clarity'] = p.career_clarity
-  if (p.subject_confidence) llm['subject_confidence'] = p.subject_confidence
-  if (p.minor) llm['minor'] = p.minor
-  if (p.notes) llm['notes'] = p.notes
+  if (p.learning_style_summary) llm['Learning Style'] = p.learning_style_summary
+  if (p.career_clarity)    llm['Career Clarity']    = titleCase(p.career_clarity)
+  if (p.subject_confidence) llm['Prior Experience']  = titleCase(p.subject_confidence)
+  if (p.minor)              llm['Minor']             = p.minor
+  if (p.notes)              llm['Notes']             = p.notes
 
   return {
     id: `onboarding-${Date.now()}`,
@@ -18,9 +25,9 @@ function toDisplayProfile(p: OnboardingProfile): LearnerProfile {
     major_or_field: p.major ?? 'Undeclared',
     learning_goals: p.career_goals ? [p.career_goals] : [],
     interests: p.interests ?? [],
-    academic_level: 'Student',
-    weekly_hours: 10,
-    preferred_formats: [],
+    academic_level: p.academic_level ?? 'Student',
+    weekly_hours: p.weekly_hours ?? 0,
+    preferred_formats: p.preferred_formats ?? [],
     llm_profile: Object.keys(llm).length > 0 ? llm : null,
     created_at: now,
     updated_at: now,
