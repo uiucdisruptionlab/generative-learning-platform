@@ -56,7 +56,7 @@ export default function LoginPage() {
               Access your generative learning resources through your institutional account.
             </p>
             <Link
-              to="/home"
+              to="/onboarding"
               className="w-full bg-gradient-to-r from-primary to-primary-light hover:shadow-xl hover:shadow-primary/30 text-white font-bold py-5 px-8 rounded-2xl transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-4 shadow-lg shadow-primary/25 mb-8"
             >
               <div className="bg-white rounded-lg p-1.5 flex items-center justify-center shadow-inner">
