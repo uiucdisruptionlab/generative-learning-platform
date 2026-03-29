@@ -56,7 +56,7 @@ export default function AppLayout({
             <Link
               to="/roadmap"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
-                location.pathname === '/roadmap'
+                location.pathname.startsWith('/roadmap')
                   ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}

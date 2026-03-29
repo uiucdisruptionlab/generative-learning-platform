@@ -1,10 +1,57 @@
 import { useState } from 'react'
 import AppLayout from '../components/AppLayout'
+import IncomeStatementPracticeCell, {
+  gradeCoffeeShopNetIncome,
+  gradeIncomeStatementFillBlank,
+  type IncomePracticeType,
+  type OpenPracticeFeedback,
+} from '../components/IncomeStatementPracticeCell'
 
 export default function IncomeStatementPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [chatInput, setChatInput] = useState('')
+  const [practiceType, setPracticeType] = useState<IncomePracticeType>('open')
+  const [openFeedback, setOpenFeedback] = useState<OpenPracticeFeedback>('idle')
+  const [fillFeedback, setFillFeedback] = useState<OpenPracticeFeedback>('idle')
+  const [fillResetKey, setFillResetKey] = useState(0)
+
+  const resetFill = () => {
+    setFillFeedback('idle')
+    setFillResetKey((k) => k + 1)
+  }
+
+  const handlePracticeTypeChange = (t: IncomePracticeType) => {
+    setPracticeType(t)
+    setOpenFeedback('idle')
+    setFillFeedback('idle')
+    setFillResetKey((k) => k + 1)
+  }
+
+  const handleAsk = () => {
+    const text = chatInput.trim()
+    if (!text) return
+
+    if (practiceType === 'open') {
+      setOpenFeedback(gradeCoffeeShopNetIncome(text) ? 'correct' : 'incorrect')
+      setChatInput('')
+      return
+    }
+
+    if (practiceType === 'fill') {
+      setFillFeedback(gradeIncomeStatementFillBlank(text) ? 'correct' : 'incorrect')
+      setChatInput('')
+    }
+  }
+
+  const chatUsesSubmit = practiceType === 'open' || practiceType === 'fill'
+
+  const chatPlaceholder =
+    practiceType === 'open'
+      ? 'e.g. $30,000 or 30000 — what is the coffee shop’s net income?'
+      : practiceType === 'fill'
+        ? 'e.g. expenses — what word fills the blank?'
+        : 'Switch to Open-ended or Fill in the blank to submit an answer in chat.'
 
   return (
     <AppLayout
@@ -99,24 +146,17 @@ export default function IncomeStatementPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl bg-gradient-to-br from-amber-50 to-emerald-50 dark:from-amber-950/30 dark:to-emerald-950/20 p-6 border-2 border-amber-200/80 dark:border-amber-800/40 shadow-soft">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-2 flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary">edit</span>
-              Try it yourself
-            </h3>
-            <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-2">
-              Imagine a coffee shop makes <strong className="text-slate-900 dark:text-white">$200,000</strong> in revenue
-              this year. Their costs include:
-            </p>
-            <ul className="list-disc list-inside text-slate-600 dark:text-slate-300 mb-4 space-y-1">
-              <li>Coffee beans and supplies: $60,000</li>
-              <li>Staff wages: $80,000</li>
-              <li>Rent and utilities: $30,000</li>
-            </ul>
-            <p className="text-slate-600 dark:text-slate-300 pb-2">
-              What's their net income? Ask a question in the chat below to check your answer.
-            </p>
-          </section>
+          <IncomeStatementPracticeCell
+            practiceType={practiceType}
+            onPracticeTypeChange={handlePracticeTypeChange}
+            openFeedback={openFeedback}
+            onResetOpenPractice={() => setOpenFeedback('idle')}
+            fillFeedback={fillFeedback}
+            fillResetKey={fillResetKey}
+            onFillResult={(r) => setFillFeedback(r)}
+            onResetFillPractice={resetFill}
+          />
+
           {/* Spacer to ensure content clears the fixed chat bar when scrolling */}
           <div aria-hidden="true" className="shrink-0" style={{ height: '100px' }} />
         </div>
@@ -132,12 +172,22 @@ export default function IncomeStatementPage() {
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Ask a question..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && chatUsesSubmit) handleAsk()
+              }}
+              placeholder={chatPlaceholder}
               className="flex-1 min-w-0 px-4 py-2.5 sm:py-3 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:border-primary focus:outline-none text-sm"
             />
             <button
               type="button"
-              className="rounded-xl bg-primary px-4 sm:px-6 py-2.5 sm:py-3 text-sm font-bold text-white hover:bg-primary-light transition-colors whitespace-nowrap"
+              onClick={handleAsk}
+              disabled={!chatUsesSubmit}
+              title={
+                chatUsesSubmit
+                  ? 'Submit your answer'
+                  : 'Switch to Open-ended or Fill in the blank to submit an answer here'
+              }
+              className="rounded-xl bg-primary px-4 sm:px-6 py-2.5 sm:py-3 text-sm font-bold text-white hover:bg-primary-light transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
             >
               Ask
             </button>
