@@ -1,7 +1,5 @@
 """
 One-time script to create uniqueness constraints on Neo4j AuraDB.
-Run from backend/:
-    python -m graphdb.setup_schema
 """
 import os
 from pathlib import Path
