@@ -3,47 +3,83 @@ export interface OnboardingMessage {
   content: string;
 }
 
-export interface OnboardingResponse {
-  message: string;  // Maps to backend 'reply'
-  done: boolean;     // Maps to backend 'is_onboarding_complete'
-  updates?: Record<string, any>;
+export type OnboardingProfile = {
+  name: string | null
+  major: string | null
+  minor: string | null
+  academic_level: string | null
+  career_goals: string | null
+  career_clarity: string | null
+  subject_confidence: string | null
+  learning_style_summary: string | null
+  weekly_hours: number | null
+  preferred_formats: string[] | null
+  interests: string[] | null
+  notes: string | null
 }
 
-export async function sendMessage(
+export type ChatResponse = {
+  message: string
+  profile: OnboardingProfile
+  done: boolean
+}
+
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+
+export type StreamEvent =
+  | { type: 'chunk'; text: string }
+  | { type: 'result'; message: string; profile: OnboardingProfile; done: boolean }
+  | { type: 'error'; message: string }
+
+export function emptyProfile(): OnboardingProfile {
+  return {
+    name: null,
+    major: null,
+    minor: null,
+    academic_level: null,
+    career_goals: null,
+    career_clarity: null,
+    subject_confidence: null,
+    learning_style_summary: null,
+    weekly_hours: null,
+    preferred_formats: null,
+    interests: null,
+    notes: null,
+  }
+}
+
+export async function* sendMessage(
   messages: OnboardingMessage[],
-  _quizAnswers: any 
-): Promise<OnboardingResponse> {
-  try {
-    // Bedrock fails on empty strings, so we ensure a default "Hello"
-    const lastContent = messages.length > 0 ? messages[messages.length - 1].content.trim() : "";
-    const messageToSend = lastContent || "Hello";
+  profile: OnboardingProfile,
+): AsyncGenerator<StreamEvent> {
+  const res = await fetch(`${API_URL}/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, profile }),
+  })
 
-    const response = await fetch("http://127.0.0.1:8000/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        message: messageToSend,
-        history: messages.slice(0, -1),
-      }),
-    });
+  if (!res.ok || !res.body) {
+    const detail = await res.text()
+    throw new Error(`Backend error ${res.status}: ${detail}`)
+  }
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || "Server error");
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const raw = line.slice(6).trim()
+        if (raw) yield JSON.parse(raw) as StreamEvent
+      }
     }
-
-    const data = await response.json();
-
-    return {
-      message: data.reply,
-      done: data.is_onboarding_complete,
-      updates: data.updates
-    };
-  } catch (error) {
-    console.error("Connection Error:", error);
-    return {
-      message: "I'm having a bit of trouble connecting to my brain. Is the backend running?",
-      done: false
-    };
   }
 }
