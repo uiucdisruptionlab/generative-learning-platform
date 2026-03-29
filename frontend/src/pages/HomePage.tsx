@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
+import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
+import { HOME_ROADMAP_PREVIEW } from '../data/homeRoadmapPreview'
 
 export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [homeRoadmapPath, setHomeRoadmapPath] = useState('/roadmap')
+  const roadmapPreview = HOME_ROADMAP_PREVIEW[homeRoadmapPath] ?? HOME_ROADMAP_PREVIEW['/roadmap']
 
   return (
     <AppLayout
@@ -45,18 +49,32 @@ export default function HomePage() {
         </section>
 
         <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-8 border-2 border-emerald-200/80 dark:border-emerald-800/40 shadow-soft">
-          <div className="flex items-center justify-between mb-6">
-            <div>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-5">
+            <div className="min-w-0">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary">route</span>
-                Financial Accounting Roadmap
+                <span className="material-symbols-outlined text-primary shrink-0">route</span>
+                <span className="break-words">{roadmapPreview.cardTitle}</span>
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                6 learning outcomes · Personalized for you
+                {roadmapPreview.cardSubtitle}
               </p>
             </div>
+            <RoadmapCourseSelect
+              variant="page"
+              value={homeRoadmapPath}
+              onValueChange={setHomeRoadmapPath}
+              className="w-full lg:w-auto lg:max-w-md shrink-0"
+            />
           </div>
-          <LearningRoadmap compact showViewFullLink />
+          <LearningRoadmap
+            key={homeRoadmapPath}
+            compact
+            showViewFullLink
+            scrollable
+            outcomes={roadmapPreview.outcomes}
+            startHereTo={roadmapPreview.startHerePath}
+            viewFullTo={roadmapPreview.fullRoadmapPath}
+          />
         </section>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 min-w-0">
