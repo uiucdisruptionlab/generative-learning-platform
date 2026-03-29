@@ -48,4 +48,5 @@ class PDFTextExtractor:
                     'text': text,
                     'metadata': element_dict.get('metadata', {})
                 })
+            # print(f"Text Extracted: {text} \n")
         return texts

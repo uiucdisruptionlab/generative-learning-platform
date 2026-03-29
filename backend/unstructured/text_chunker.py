@@ -36,5 +36,6 @@ class TextChunker:
                     'chunk': chunk,
                     'metadata': chunk_metadata
                 })
+                print(f"Text Chunked: {chunk}\n")
         
         return chunks

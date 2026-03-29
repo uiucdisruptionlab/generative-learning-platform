@@ -21,7 +21,8 @@ def process_pdf(pdf_path: str, pinecone_index: str, pinecone_api_key: str, unstr
     embedder = BedrockEmbedder()
     pinecone_client = PineconeClient(
         api_key=pinecone_api_key,
-        index_name=pinecone_index
+        index_name=pinecone_index,
+        namespace="DL_Transcripts"
     )
 
     texts = extractor.extract_texts(pdf_path)
@@ -57,9 +58,35 @@ def process_pdf(pdf_path: str, pinecone_index: str, pinecone_api_key: str, unstr
         print("No records to upsert")
 
 
+def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key):
+    if not os.path.exists(folder_path):
+        raise RuntimeError(f"Folder does not exist: {folder_path}")
+
+    files = os.listdir(folder_path)
+
+    pdf_files = [f for f in files if f.lower().endswith(".pdf")]
+
+    if not pdf_files:
+        print("No PDF files found in folder.")
+        return
+
+    print(f"Found {len(pdf_files)} PDF(s). Processing...\n")
+
+    for file_name in pdf_files:
+        pdf_path = os.path.join(folder_path, file_name)
+
+        try:
+            print(f"Processing: {file_name}")
+            process_pdf(pdf_path, pinecone_index, pinecone_api_key, unstructured_api_key)
+            print(f"Finished: {file_name}\n")
+        except Exception as e:
+            print(f"Error processing {file_name}: {e}\n")
+
+
 if __name__ == "__main__":
     _script_dir = os.path.dirname(os.path.abspath(__file__))
-    pdf_path = os.path.join(_script_dir, "unstructured", "input_files", "canvas_api_sow.pdf")
+    folder_path = os.path.join(_script_dir, "sample_data",)
+    file_path = os.path.join(_script_dir, "sample_data", "DL_lec06.pdf")
     pinecone_index = os.getenv("PINECONE_INDEX")
     pinecone_api_key = os.getenv("PINECONE_API_KEY")
     unstructured_api_key = os.getenv("UNSTRUCTURED_API_KEY")
@@ -69,4 +96,5 @@ if __name__ == "__main__":
     if not unstructured_api_key:
         raise RuntimeError("UNSTRUCTURED_API_KEY environment variable is required.")
 
-    process_pdf(pdf_path, pinecone_index, pinecone_api_key, unstructured_api_key)
+    # process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key)
+    process_pdf(file_path, pinecone_index, pinecone_api_key, unstructured_api_key)
