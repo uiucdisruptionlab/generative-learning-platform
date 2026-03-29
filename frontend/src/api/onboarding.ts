@@ -3,55 +3,83 @@ export type OnboardingMessage = {
   content: string
 }
 
-export type QuizAnswers = Record<string, string>
-
-export type OnboardingResponse = {
-  message: string
-  options?: string[]
-  done?: boolean
+export type OnboardingProfile = {
+  name: string | null
+  major: string | null
+  minor: string | null
+  academic_level: string | null
+  career_goals: string | null
+  career_clarity: string | null
+  subject_confidence: string | null
+  learning_style_summary: string | null
+  weekly_hours: number | null
+  preferred_formats: string[] | null
+  interests: string[] | null
+  notes: string | null
 }
 
-/**
- * Mock onboarding chat API. Simulates multi-turn conversation
- * to collect name, major, career goals, and prior knowledge.
- * Returns done: true after a few exchanges.
- */
-export async function sendMessage(
-  messages: OnboardingMessage[],
-  quizAnswers: QuizAnswers
-): Promise<OnboardingResponse> {
-  // Simulate network delay
-  await new Promise((r) => setTimeout(r, 600))
+export type ChatResponse = {
+  message: string
+  profile: OnboardingProfile
+  done: boolean
+}
 
-  const messageCount = messages.length
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
-  // Simple mock: respond based on turn count and user input
-  if (messageCount === 0) {
-    return {
-      message: "Hello! What's your name?",
-    }
-  }
-  if (messageCount === 2) {
-    const name = messages[messages.length - 1]?.content || 'there'
-    return {
-      message: `Nice to meet you, ${name}! What's your major or area of study?`,
-    }
-  }
-  if (messageCount === 4) {
-    return {
-      message:
-        "Thanks! What are your main career goals? What kind of work do you see yourself doing?",
-    }
-  }
-  if (messageCount === 6) {
-    return {
-      message:
-        "One more thing: what's your prior experience with this subject? Are you new to it or do you have some background?",
-    }
-  }
-  // messageCount >= 8: user just answered prior experience
+export type StreamEvent =
+  | { type: 'chunk'; text: string }
+  | { type: 'result'; message: string; profile: OnboardingProfile; done: boolean }
+  | { type: 'error'; message: string }
+
+export function emptyProfile(): OnboardingProfile {
   return {
-    message: "Thanks, that's all I needed!",
-    done: true,
+    name: null,
+    major: null,
+    minor: null,
+    academic_level: null,
+    career_goals: null,
+    career_clarity: null,
+    subject_confidence: null,
+    learning_style_summary: null,
+    weekly_hours: null,
+    preferred_formats: null,
+    interests: null,
+    notes: null,
+  }
+}
+
+export async function* streamMessage(
+  messages: OnboardingMessage[],
+  profile: OnboardingProfile,
+): AsyncGenerator<StreamEvent> {
+  const res = await fetch(`${API_URL}/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, profile }),
+  })
+
+  if (!res.ok || !res.body) {
+    const detail = await res.text()
+    throw new Error(`Backend error ${res.status}: ${detail}`)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const raw = line.slice(6).trim()
+        if (raw) yield JSON.parse(raw) as StreamEvent
+      }
+    }
   }
 }

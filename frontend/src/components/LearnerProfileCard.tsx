@@ -128,8 +128,8 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
           </div>
         </div>
 
-        {/* Weekly Commitment */}
-        <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-amber-200/50 dark:border-amber-800/30 shadow-soft p-6">
+        {/* Weekly Commitment — hidden when no hours collected yet */}
+        <div className={`rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-amber-200/50 dark:border-amber-800/30 shadow-soft p-6 ${profile.weekly_hours === 0 ? 'opacity-40' : ''}`}>
           <div className="flex items-center gap-2 mb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-900/30 text-secondary">
               <span className="material-symbols-outlined">schedule</span>
@@ -229,10 +229,10 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
         </div>
       </div>
 
-      {/* LLM Profile Summary (if exists) */}
+      {/* AI Learning Insights */}
       {profile.llm_profile && Object.keys(profile.llm_profile).length > 0 && (
         <div className="rounded-2xl bg-gradient-to-br from-white via-purple-50/20 to-white dark:from-slate-900 dark:via-purple-900/10 dark:to-slate-900 border-2 border-purple-200/50 dark:border-purple-800/30 shadow-soft p-6">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-5">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
               <span className="material-symbols-outlined">psychology</span>
             </div>
@@ -240,21 +240,39 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
               AI Learning Insights
             </h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Object.entries(profile.llm_profile).map(([key, value]) => (
-              <div
-                key={key}
-                className="p-4 rounded-xl bg-purple-50/50 dark:bg-purple-900/20 border border-purple-200/50 dark:border-purple-800/30"
-              >
-                <p className="text-xs font-bold uppercase tracking-wide text-purple-600 dark:text-purple-400 mb-1">
-                  {key.replace(/_/g, ' ')}
-                </p>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                </p>
-              </div>
-            ))}
-          </div>
+
+          {/* Learning Style — full-width paragraph */}
+          {profile.llm_profile['Learning Style'] && (
+            <div className="mb-4 p-4 rounded-xl bg-purple-50/60 dark:bg-purple-900/25 border border-purple-200/60 dark:border-purple-800/40">
+              <p className="text-xs font-bold uppercase tracking-widest text-purple-600 dark:text-purple-400 mb-2">
+                Learning Style
+              </p>
+              <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                {String(profile.llm_profile['Learning Style'])}
+              </p>
+            </div>
+          )}
+
+          {/* Remaining insights — compact grid */}
+          {Object.entries(profile.llm_profile).filter(([key]) => key !== 'Learning Style').length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {Object.entries(profile.llm_profile)
+                .filter(([key]) => key !== 'Learning Style')
+                .map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="p-4 rounded-xl bg-purple-50/50 dark:bg-purple-900/20 border border-purple-200/50 dark:border-purple-800/30"
+                  >
+                    <p className="text-xs font-bold uppercase tracking-wide text-purple-600 dark:text-purple-400 mb-1">
+                      {key}
+                    </p>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
 
