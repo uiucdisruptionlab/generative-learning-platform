@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import AppLayout from '../components/AppLayout'
 import HIST102Roadmap from '../components/HIST102Roadmap'
+import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
 
 export default function HIST102RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -14,6 +15,7 @@ export default function HIST102RoadmapPage() {
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
       title="World History II"
       description="6 learning outcomes · Personalized for you"
+      action={<RoadmapCourseSelect variant="header" />}
     >
       <div className="max-w-[800px] w-full min-w-0 mx-auto px-8 lg:px-12 py-8 lg:py-12">
         <HIST102Roadmap />

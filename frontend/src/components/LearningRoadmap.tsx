@@ -1,50 +1,79 @@
 import { Link } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
+import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 
-const OUTCOMES = [
+const DEFAULT_OUTCOMES: HomeRoadmapOutcome[] = [
   {
     id: '1',
     title: 'Reading a Financial Statement',
-    status: 'completed' as const,
+    status: 'completed',
   },
   {
     id: '2',
     title: 'The Income Statement',
-    status: 'current' as const,
+    status: 'current',
     subtext: 'Based on your background, this is the right place to start.',
   },
   {
     id: '3',
     title: 'The Balance Sheet',
-    status: 'upcoming' as const,
+    status: 'upcoming',
   },
   {
     id: '4',
     title: 'Cash Flow Basics',
-    status: 'upcoming' as const,
+    status: 'upcoming',
   },
   {
     id: '5',
     title: 'Ratio Analysis',
-    status: 'upcoming' as const,
+    status: 'upcoming',
   },
   {
     id: '6',
     title: 'Interpreting Performance',
-    status: 'upcoming' as const,
+    status: 'upcoming',
   },
 ]
 
 type LearningRoadmapProps = {
   compact?: boolean
   showViewFullLink?: boolean
+  /** When true, list is capped in height and scrolls; current step is scrolled into view. */
+  scrollable?: boolean
+  outcomes?: HomeRoadmapOutcome[]
+  startHereTo?: string
+  viewFullTo?: string
 }
 
-export default function LearningRoadmap({ compact, showViewFullLink }: LearningRoadmapProps) {
-  return (
+export default function LearningRoadmap({
+  compact,
+  showViewFullLink,
+  scrollable,
+  outcomes: outcomesProp,
+  startHereTo = '/module/income-statement',
+  viewFullTo = '/roadmap',
+}: LearningRoadmapProps) {
+  const outcomes = outcomesProp ?? DEFAULT_OUTCOMES
+  const currentItemRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!scrollable || !currentItemRef.current) return
+    const id = requestAnimationFrame(() => {
+      currentItemRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [scrollable, outcomes])
+
+  const list = (
     <div className="relative pl-1">
       <div className="absolute left-[11px] top-8 bottom-8 w-0 border-l-2 border-dashed border-slate-300 dark:border-slate-600" />
-      {OUTCOMES.map((outcome) => (
-        <div key={outcome.id} className={`relative flex gap-6 ${compact ? 'pb-6 last:pb-0' : 'pb-10 last:pb-0'}`}>
+      {outcomes.map((outcome) => (
+        <div
+          key={outcome.id}
+          ref={outcome.status === 'current' ? currentItemRef : undefined}
+          className={`relative flex gap-6 ${compact ? 'pb-6 last:pb-0' : 'pb-10 last:pb-0'}`}
+        >
           <div
             className={`relative z-10 flex shrink-0 items-center justify-center rounded-full ${
               outcome.status === 'completed'
@@ -82,7 +111,7 @@ export default function LearningRoadmap({ compact, showViewFullLink }: LearningR
               </div>
               {outcome.status === 'current' && (
                 <Link
-                  to="/module/income-statement"
+                  to={startHereTo}
                   className="shrink-0 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-light transition-all shadow-md shadow-primary/20 inline-block"
                 >
                   Start here
@@ -92,10 +121,22 @@ export default function LearningRoadmap({ compact, showViewFullLink }: LearningR
           </div>
         </div>
       ))}
+    </div>
+  )
+
+  return (
+    <div>
+      {scrollable ? (
+        <div className="max-h-[min(11rem,27vh)] overflow-y-auto overscroll-y-contain scroll-smooth rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-stone-50/50 dark:bg-slate-950/30 px-3 py-2 sm:px-4">
+          {list}
+        </div>
+      ) : (
+        list
+      )}
       {showViewFullLink && (
-        <div className="mt-6 pl-8">
+        <div className={`mt-6 pl-8 ${scrollable ? 'border-t border-emerald-200/40 dark:border-emerald-800/30 pt-4' : ''}`}>
           <Link
-            to="/roadmap"
+            to={viewFullTo}
             className="text-sm font-semibold text-primary hover:underline inline-flex items-center gap-1"
           >
             View full roadmap
