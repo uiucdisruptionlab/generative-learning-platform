@@ -1,6 +1,8 @@
 import { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import PageHeader from './PageHeader'
+import PersonaToggle from './PersonaToggle'
+import { usePersona } from '../contexts/PersonaContext'
 
 type AppLayoutProps = {
   sidebarOpen: boolean
@@ -24,9 +26,11 @@ export default function AppLayout({
   children,
 }: AppLayoutProps) {
   const location = useLocation()
+  const { currentPersona, setCurrentPersona } = usePersona()
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
+      <PersonaToggle currentPersona={currentPersona} onPersonaChange={setCurrentPersona} />
       <aside
         className={`w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-r-2 border-primary/15 dark:border-primary/20 flex flex-col fixed h-full transition-transform duration-300 z-30 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
