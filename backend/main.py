@@ -79,10 +79,7 @@ Information to collect — weave naturally into conversation, combine when it ma
 6. weekly_hours + preferred_formats — e.g. "How many hours a week can you dedicate, and how do
    you prefer to learn — videos, reading, hands-on practice, case studies?"
 
-Valid career_clarity values: very_clear | somewhat_clear | exploring | unsure
-Valid subject_confidence values: totally_new | beginner | somewhat_familiar | comfortable | advanced
-
-The JSON schema you must return is:
+You need to return a comma separated list of the following schema:
 {
   "assistant_reply": "string",
   "extracted_updates": {
@@ -91,7 +88,6 @@ The JSON schema you must return is:
     "minor": "string or null",
     "academic_level": "string or null  (e.g. Freshman, Sophomore, Junior, Senior, Graduate)",
     "career_goals": "string or null",
-    "career_clarity": "very_clear | somewhat_clear | exploring | unsure | null",
     "subject_confidence": "totally_new | beginner | somewhat_familiar | comfortable | advanced | null",
     "learning_style_summary": "string or null",
     "weekly_hours": "number or null",
@@ -102,6 +98,7 @@ The JSON schema you must return is:
   "user_seems_finished": boolean,
   "missing_fields": ["field_name", "..."]
 }
+After the onboarding is done, convert the list into a jsonb column in the database for future reference and personalization.
 """
 
 # ---------------------------------------------------------------------------
