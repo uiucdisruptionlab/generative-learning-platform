@@ -1,7 +1,5 @@
 """
 End-to-end test for the Neo4j graph ingestion layer.
-Run from backend/:
-    python -m graphdb.test_graph
 """
 import os
 import sys
