@@ -7,13 +7,24 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from unstructured.pdf_text_extractor import PDFTextExtractor
 from unstructured.text_chunker import TextChunker
 from bedrock.embedder import BedrockEmbedder
+from concept_extractor import extract_concepts_from_chunk
+from graphdb.graph_ingestion import ingest as ingest_graph
 from pc_client.client import PineconeClient
-from pc_client.models.chunks import ChunkMetadata
+from pc_client.models.chunks import ChunkMetadata, CourseChunk
 
 
-def process_pdf(pdf_path: str, pinecone_index: str, pinecone_api_key: str, unstructured_api_key: str):
+def process_pdf(
+    pdf_path: str,
+    pinecone_index: str,
+    pinecone_api_key: str,
+    unstructured_api_key: str,
+    enable_graph_ingestion: bool = False,
+):
     """
-    Orchestrates the full pipeline: extract -> chunk -> embed -> upsert
+    Orchestrates the full pipeline: extract -> chunk -> embed -> upsert.
+
+    When enable_graph_ingestion is True, each chunk is also passed through the
+    Bedrock concept extractor and written to Neo4j.
     """
   
     extractor = PDFTextExtractor(unstructured_api_key)
@@ -34,22 +45,34 @@ def process_pdf(pdf_path: str, pinecone_index: str, pinecone_api_key: str, unstr
     records = []
     offering_id = os.path.splitext(os.path.basename(pdf_path))[0]
     for chunk in chunks:
-        vec = embedder.embed_data(chunk['chunk'])
-        chunk_index = chunk['metadata'].get('chunk_index', 0)
+        chunk_text = chunk["chunk"]
+        vec = embedder.embed_data(chunk_text)
+        chunk_index = chunk["metadata"].get("chunk_index", 0)
         chunk_id = f"{offering_id}_p{chunk['metadata'].get('page_number', 1)}_c{chunk_index}"
         metadata = ChunkMetadata(
             offering_id=offering_id,
             source_type="textbook",
             topic=offering_id,
-            text=chunk['chunk'],
+            text=chunk_text,
             chunk_number=chunk_index + 1,
         )
+        course_chunk = CourseChunk(id=chunk_id, values=vec, metadata=metadata)
         record = pinecone_client.create_record(
             id=chunk_id,
             embeddings=vec,
             metadata=metadata,
         )
         records.append(record)
+
+        if enable_graph_ingestion:
+            extracted = extract_concepts_from_chunk(
+                {
+                    "chunk_id": chunk_id,
+                    "text": chunk_text,
+                    "metadata": chunk.get("metadata", {}),
+                }
+            )
+            ingest_graph(course_chunk, extracted)
 
     if records:
         pinecone_client.upsert(records)
@@ -90,6 +113,7 @@ if __name__ == "__main__":
     pinecone_index = os.getenv("PINECONE_INDEX")
     pinecone_api_key = os.getenv("PINECONE_API_KEY")
     unstructured_api_key = os.getenv("UNSTRUCTURED_API_KEY")
+    enable_graph_ingestion = os.getenv("ENABLE_GRAPH_INGESTION", "false").lower() == "true"
 
     if not pinecone_api_key:
         raise RuntimeError("PINECONE_API_KEY environment variable is required.")
@@ -97,4 +121,10 @@ if __name__ == "__main__":
         raise RuntimeError("UNSTRUCTURED_API_KEY environment variable is required.")
 
     # process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key)
-    process_pdf(file_path, pinecone_index, pinecone_api_key, unstructured_api_key)
+    process_pdf(
+        file_path,
+        pinecone_index,
+        pinecone_api_key,
+        unstructured_api_key,
+        enable_graph_ingestion=enable_graph_ingestion,
+    )
