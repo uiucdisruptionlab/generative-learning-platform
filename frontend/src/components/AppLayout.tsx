@@ -1,6 +1,8 @@
 import { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import PageHeader from './PageHeader'
+import PersonaToggle from './PersonaToggle'
+import { usePersona } from '../contexts/PersonaContext'
 
 type AppLayoutProps = {
   sidebarOpen: boolean
@@ -24,9 +26,11 @@ export default function AppLayout({
   children,
 }: AppLayoutProps) {
   const location = useLocation()
+  const { currentPersona, setCurrentPersona } = usePersona()
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
+      <PersonaToggle currentPersona={currentPersona} onPersonaChange={setCurrentPersona} />
       <aside
         className={`w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-r-2 border-primary/15 dark:border-primary/20 flex flex-col fixed h-full transition-transform duration-300 z-30 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
@@ -46,7 +50,7 @@ export default function AppLayout({
               to="/home"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
                 location.pathname === '/home'
-                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
@@ -54,39 +58,38 @@ export default function AppLayout({
               <span className="text-sm font-semibold">Home</span>
             </Link>
             <Link
-              to="/dashboard"
+              to="/roadmap"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
-                location.pathname === '/dashboard'
-                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
+                location.pathname.startsWith('/roadmap')
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">work</span>
-              <span className="text-sm font-semibold">Career Hub</span>
+              <span className="material-symbols-outlined group-hover:text-primary transition-colors">route</span>
+              <span className="text-sm font-semibold">Roadmap</span>
             </Link>
             <Link
               to="/courses"
               className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
                 location.pathname === '/courses'
-                  ? 'bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/25'
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
               <span className="material-symbols-outlined group-hover:text-primary transition-colors">book</span>
               <span className="text-sm font-semibold">My Courses</span>
             </Link>
-            <a href="#" className="flex items-center gap-3.5 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">ads_click</span>
-              <span className="text-sm font-semibold">Skills Path</span>
-            </a>
-            <a href="#" className="flex items-center gap-3.5 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">assignment</span>
-              <span className="text-sm font-semibold">Assignments</span>
-            </a>
-            <a href="#" className="flex items-center gap-3.5 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all group">
-              <span className="material-symbols-outlined group-hover:text-primary transition-colors">bar_chart</span>
-              <span className="text-sm font-semibold">Performance</span>
-            </a>
+            <Link
+              to="/profile"
+              className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all group ${
+                location.pathname === '/profile'
+                  ? 'bg-primary/10 dark:bg-primary/20 border-l-4 border-primary text-primary shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              <span className="material-symbols-outlined group-hover:text-primary transition-colors">person</span>
+              <span className="text-sm font-semibold">Profile</span>
+            </Link>
           </nav>
         </div>
         <div className="mt-auto p-8 pt-0 border-t border-slate-100 dark:border-slate-800">

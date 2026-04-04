@@ -1,3 +1,9 @@
 node_modules
 dist
 .env
+.claude/settings.local.json
+.gitignore
+.vscode/settings.json
+backend/__pycache__/main.cpython-310.pyc
+backend/__pycache__/main.cpython-310.pyc
+backend/__pycache__/main.cpython-310.pyc
