@@ -61,6 +61,44 @@ def get_concepts_by_lecture(lecture_id: str) -> list[dict[str, str]]:
     return [{"name": r["name"], "description": r["description"]} for r in records]
 
 
+def get_concept_graph_by_lecture(lecture_id: str) -> dict:
+    with _driver() as driver:
+        concept_records, _, _ = driver.execute_query(
+            """
+            MATCH (ch:Chunk {source: $lecture_id})-[:CONTAINS]->(c:Concept)
+            RETURN DISTINCT c.name AS name, c.description AS description
+            """,
+            lecture_id=lecture_id,
+            database_=_DATABASE,
+        )
+        relationship_records, _, _ = driver.execute_query(
+            """
+            MATCH (ch:Chunk {source: $lecture_id})-[:CONTAINS]->(a:Concept)-[r]->(b:Concept)
+            WHERE EXISTS {
+                MATCH (:Chunk {source: $lecture_id})-[:CONTAINS]->(b)
+            }
+            RETURN DISTINCT a.name AS from, type(r) AS type, b.name AS to
+            """,
+            lecture_id=lecture_id,
+            database_=_DATABASE,
+        )
+        chunk_records, _, _ = driver.execute_query(
+            """
+            MATCH (ch:Chunk {source: $lecture_id})-[:CONTAINS]->(c:Concept)
+            RETURN ch.id AS chunk_id, ch.source AS lecture_id, ch.order AS chunk_order, c.name AS concept_name
+            """,
+            lecture_id=lecture_id,
+            database_=_DATABASE,
+        )
+
+    return {
+        "lecture_id": lecture_id,
+        "concepts": [record.data() for record in concept_records],
+        "relationships": [record.data() for record in relationship_records],
+        "chunk_links": [record.data() for record in chunk_records],
+    }
+
+
 def create_chunk(id: str, source: str, order: int) -> None:
     with _driver() as driver:
         driver.execute_query(
@@ -107,3 +145,31 @@ def link_chunk_to_concept(chunk_id: str, concept_name: str) -> None:
             chunk_id=chunk_id, concept_name=concept_name,
             database_=_DATABASE,
         )
+
+
+def get_concept_graph() -> dict:
+    with _driver() as driver:
+        concept_records, _, _ = driver.execute_query(
+            "MATCH (c:Concept) RETURN c.name AS name, c.description AS description",
+            database_=_DATABASE,
+        )
+        relationship_records, _, _ = driver.execute_query(
+            """
+            MATCH (a:Concept)-[r]->(b:Concept)
+            RETURN a.name AS from, type(r) AS type, b.name AS to
+            """,
+            database_=_DATABASE,
+        )
+        chunk_records, _, _ = driver.execute_query(
+            """
+            MATCH (ch:Chunk)-[:CONTAINS]->(c:Concept)
+            RETURN ch.id AS chunk_id, ch.source AS lecture_id, ch.order AS chunk_order, c.name AS concept_name
+            """,
+            database_=_DATABASE,
+        )
+
+    return {
+        "concepts": [record.data() for record in concept_records],
+        "relationships": [record.data() for record in relationship_records],
+        "chunk_links": [record.data() for record in chunk_records],
+    }
