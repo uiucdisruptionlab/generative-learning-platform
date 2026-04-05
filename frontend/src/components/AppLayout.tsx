@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import PageHeader from './PageHeader'
 import PersonaToggle from './PersonaToggle'
 import { usePersona } from '../contexts/PersonaContext'
+import { getSidebarProfile } from '../data/personas'
 
 type AppLayoutProps = {
   sidebarOpen: boolean
@@ -27,6 +28,7 @@ export default function AppLayout({
 }: AppLayoutProps) {
   const location = useLocation()
   const { currentPersona, setCurrentPersona } = usePersona()
+  const sidebarProfile = getSidebarProfile(currentPersona)
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
@@ -115,16 +117,18 @@ export default function AppLayout({
             )}
           </div>
           <div className="flex items-center gap-3.5 px-1 pt-6">
-            <div
-              className="size-11 rounded-full bg-slate-200 dark:bg-slate-700 bg-cover bg-center ring-2 ring-white dark:ring-slate-900 shadow-sm"
-              style={{
-                backgroundImage:
-                  "url('https://lh3.googleusercontent.com/aida-public/AB6AXuDs46P0CZ3XO6IpxwKmlWOzkVVgpzXbgHshy0mB95PNbmEuNjREXUdGTy9uWs4yL3WiG3k00SqntZWP9ixeKoRrYw5KHge_gn69LU_absQEGK1VHQV2U2Hm91HQgAvIEcTdkchtjKtU3U0fEOjxezLIcdu7x_L7-Tz20vYYx_xU6J42r9a2hhztQsm447XonCJkerJtP3lzUzSUoJoLLeU1LObC2wSaNzunidTHSlUSIJ6zNtLTVDYumNRFEUtqAn65QR-AmQ4b9qsw')",
-              }}
+            <img
+              src={sidebarProfile.avatarUrl}
+              alt=""
+              width={44}
+              height={44}
+              className="size-11 rounded-full object-cover bg-slate-200 dark:bg-slate-700 ring-2 ring-white dark:ring-slate-900 shadow-sm shrink-0"
             />
-            <div className="flex flex-col">
-              <p className="text-sm font-bold text-slate-900 dark:text-white leading-tight">Alex Johnson</p>
-              <p className="text-[11px] text-slate-400 font-medium">Student ID: 882104</p>
+            <div className="flex flex-col min-w-0">
+              <p className="text-sm font-bold text-slate-900 dark:text-white leading-tight truncate">
+                {sidebarProfile.displayName}
+              </p>
+              <p className="text-[11px] text-slate-400 font-medium">Student ID: {sidebarProfile.studentId}</p>
             </div>
           </div>
         </div>
