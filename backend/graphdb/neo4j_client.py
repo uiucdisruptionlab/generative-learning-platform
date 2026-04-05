@@ -26,6 +26,28 @@ def get_all_concepts() -> list[str]:
     return [r["name"] for r in records]
 
 
+def get_lessons_by_course(course_id: str) -> list[dict]:
+    with _driver() as driver:
+        records, _, _ = driver.execute_query(
+            """
+            MATCH (l:Lesson {course_id: $course_id})
+            OPTIONAL MATCH (prereq:Lesson)-[:PREREQUISITE_OF]->(l)
+            RETURN l.id AS lesson_id, l.title AS title, collect(prereq.id) AS prerequisites
+            ORDER BY size((()-[:PREREQUISITE_OF]->(l))) ASC
+            """,
+            course_id=course_id,
+            database_=_DATABASE,
+        )
+    return [
+        {
+            "lesson_id": r["lesson_id"],
+            "title": r["title"],
+            "prerequisites": list(r["prerequisites"]),
+        }
+        for r in records
+    ]
+
+
 def get_concepts_by_lecture(lecture_id: str) -> list[dict[str, str]]:
     with _driver() as driver:
         records, _, _ = driver.execute_query(
