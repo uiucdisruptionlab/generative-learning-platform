@@ -36,7 +36,7 @@ All writes use `MERGE`, so re-running the pipeline on the same document is safe 
 |------|---------|
 | `neo4j_client.py` | Low-level Neo4j connection and Cypher operations |
 | `graph_ingestion.py` | `ingest(chunk, extracted)` — orchestrates a full write for one chunk |
-| `setup_schema.py` | One-time script to create uniqueness constraints |
+| `setup_schema.py` | One-time script to create uniqueness constraints — **already run, do not run again** |
 | `test_graph.py` | End-to-end test with fake data and a live verification query |
 | `main.py` | Scratch file used during initial Neo4j connection setup |
 
@@ -50,13 +50,9 @@ NEO4J_PASSWORD=<password>
 NEO4J_DATABASE=<database-name>
 ```
 
-**2. Run schema setup once:**
-```bash
-cd backend
-python -m graphdb.setup_schema
-```
+**2. Schema setup — ALREADY DONE, DO NOT RUN AGAIN:**
 
-This creates uniqueness constraints on `Concept.name` and `Chunk.id`.
+> `setup_schema.py` has already been run against the AuraDB instance. The uniqueness constraints on `Concept.name` and `Chunk.id` are live in the database. Running it again is harmless but unnecessary. Only run it if you are pointing the credentials at a brand new database instance.
 
 **3. Run the test to verify the connection and writes:**
 ```bash

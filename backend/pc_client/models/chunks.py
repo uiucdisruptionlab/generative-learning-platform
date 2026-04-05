@@ -12,16 +12,16 @@ class ChunkMetadata:
     def validate_data(self):
 
         if not self.offering_id or not self.offering_id.strip():
-            return ValueError("Offering ID Missing")
+            raise ValueError("Offering ID Missing")
 
         if not self.source_type or not self.source_type.strip():
-            return ValueError("Source Type Missing")
+            raise ValueError("Source Type Missing")
 
         if not self.topic or not self.topic.strip():
-            return ValueError("Topic Missing")
+            raise ValueError("Topic Missing")
 
         if not self.text or not self.text.strip():
-            return ValueError("Text Missing")
+            raise ValueError("Text Missing")
 
         if not isinstance(self.chunk_number, int):
             raise ValueError("Chunk number must be an integer")
