@@ -26,6 +26,19 @@ def get_all_concepts() -> list[str]:
     return [r["name"] for r in records]
 
 
+def get_concepts_by_lecture(lecture_id: str) -> list[dict[str, str]]:
+    with _driver() as driver:
+        records, _, _ = driver.execute_query(
+            """
+            MATCH (ch:Chunk {source: $lecture_id})-[:CONTAINS]->(c:Concept)
+            RETURN DISTINCT c.name AS name, c.description AS description
+            """,
+            lecture_id=lecture_id,
+            database_=_DATABASE,
+        )
+    return [{"name": r["name"], "description": r["description"]} for r in records]
+
+
 def create_chunk(id: str, source: str, order: int) -> None:
     with _driver() as driver:
         driver.execute_query(
