@@ -5,8 +5,6 @@ import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
 import { fetchRoadmap } from '../api/roadmap'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 
-const COURSE_ID = 'accounting'
-
 function mapToOutcomes(lessons: { lesson_id: string; title: string; prerequisites: string[] }[]): HomeRoadmapOutcome[] {
   return lessons.map((lesson, index) => ({
     id: lesson.lesson_id,
@@ -22,7 +20,7 @@ export default function RoadmapPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchRoadmap(COURSE_ID)
+    fetchRoadmap()
       .then((data) => setOutcomes(mapToOutcomes(data.lessons)))
       .catch((err) => setError(String(err)))
   }, [])

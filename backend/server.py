@@ -314,16 +314,13 @@ def _process_llm_response(
 # Routes
 # ---------------------------------------------------------------------------
 
-@app.get("/roadmap/course/{course_id}")
-def get_roadmap(course_id: str):
-    from graphdb.neo4j_client import get_lessons_by_course
+@app.get("/roadmap")
+def get_roadmap():
+    from graphdb.roadmap_builder import build_roadmap
     try:
-        lessons = get_lessons_by_course(course_id)
+        return build_roadmap(course="accounting")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    if not lessons:
-        raise HTTPException(status_code=404, detail=f"No lessons found for course '{course_id}'")
-    return {"course_id": course_id, "lessons": lessons}
 
 
 @app.get("/health")
