@@ -1,9 +1,11 @@
 import os
 from typing import List, Dict, Any
-
+from pinecone import Pinecone, PineconeApiException
 import unstructured_client
 from unstructured_client.models import operations, shared
 
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+index = os.getenv("PINECONE_INDEX", "library")
 
 class PDFTextExtractor:
     """

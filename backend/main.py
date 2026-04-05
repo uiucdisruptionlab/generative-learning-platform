@@ -105,7 +105,7 @@ def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_a
 if __name__ == "__main__":
     _script_dir = os.path.dirname(os.path.abspath(__file__))
     folder_path = os.path.join(_script_dir, "sample_data",)
-    file_path = os.path.join(_script_dir, "sample_data", "DL_lec08.pdf")
+    file_path = os.path.join(_script_dir, "sample_data", "accounting", "ALecFinal.pdf")
     pinecone_index = os.getenv("PINECONE_INDEX")
     pinecone_api_key = os.getenv("PINECONE_API_KEY")
     unstructured_api_key = os.getenv("UNSTRUCTURED_API_KEY")
