@@ -32,6 +32,24 @@ export type FetchRoadmapParams = {
   refine?: boolean
 }
 
+export type FrontendRoadmapTarget = {
+  course: string
+  lectureId?: string
+}
+
+export const ROADMAP_TARGETS: Record<string, FrontendRoadmapTarget> = {
+  accounting: {
+    course: 'ALecFinal',
+    lectureId: 'ALecFinal',
+  },
+  python: {
+    course: 'python',
+  },
+  financing: {
+    course: 'financing',
+  },
+}
+
 export async function fetchRoadmap(params: FetchRoadmapParams = {}): Promise<RoadmapResponse> {
   const search = new URLSearchParams()
   if (params.course) search.set('course', params.course)

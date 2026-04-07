@@ -217,6 +217,7 @@ def get_concept_graph() -> dict:
             OPTIONAL MATCH (le:Lecture)-[:HAS_CHUNK]->(ch)
             OPTIONAL MATCH (co:Course)-[:HAS_LECTURE]->(le)
             RETURN ch.id AS chunk_id,
+                   ch.source AS chunk_source,
                    le.id AS lecture_id,
                    co.id AS course_id,
                    ch.order AS chunk_order,

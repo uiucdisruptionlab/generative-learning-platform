@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any
 
-import boto3
+from bedrock.client import create_bedrock_runtime_client
 
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 BEDROCK_MODEL_ID = os.getenv(
@@ -44,10 +44,16 @@ Output schema:
 }
 
 Rules:
+- Return fewer, stronger lessons. Prefer roughly 6-12 lessons for a lecture-sized roadmap unless the draft is extremely small.
+- Aggressively remove administrative, metadata, or low-value content such as slide credits, logos, professor names, page labels, agenda items, exam logistics, assignment labels, one-off jokes, image credits, or stray examples that are not core course concepts.
+- Remove trivial or overly narrow lessons that are really just syntax fragments, tiny facts, or one-off examples. Merge them into broader teachable units when possible.
 - Merge repetitive or overlapping lessons when appropriate.
-- Remove weak or trivial lessons if they do not add real learning value.
+- Rewrite vague lesson titles into concrete, human-readable teaching units. Avoid titles like abbreviations, generic words, or weak labels such as "Pitfalls", "Approach", "Agenda", or isolated acronyms unless they are truly standard and self-explanatory in the field.
+- Prefer broader lesson-sized units over concept-sized units. A lesson should feel like something a student would realistically expect to study in a course roadmap.
 - Keep the lesson ordering logically teachable.
-- Preserve prerequisite IDs when they still make sense after merging.
+- Push final review, wrap-up, exam, or summary material toward the end of the roadmap, or remove it if it is mostly administrative.
+- When chunk_ids indicate one lesson comes from much later source pages than another, prefer the earlier source material first unless prerequisites strongly require otherwise.
+- Preserve prerequisite IDs when they still make sense after merging, but simplify noisy prerequisite structure when needed for clarity.
 - Keep each lesson focused on meaningful concepts.
 - Do not invent concepts not present in the draft roadmap.
 - Keep summaries short and useful.
@@ -69,6 +75,14 @@ def _parse_llm_json(raw_text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
+    fenced_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw_text, flags=re.DOTALL)
+    if fenced_match:
+        raw_text = fenced_match.group(1).strip()
+        try:
+            return json.loads(raw_text)
+        except json.JSONDecodeError:
+            pass
+
     match = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
     if not match:
         raise ValueError(f"No JSON object found in model response: {raw_text}")
@@ -86,6 +100,12 @@ def _parse_llm_json(raw_text: str) -> dict[str, Any]:
         return f'"{inner}"'
 
     cleaned = re.sub(r'"((?:[^"\\]|\\.)*)"', _escape_string, candidate, flags=re.DOTALL)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
     return json.loads(cleaned)
 
 
@@ -136,18 +156,28 @@ def _normalize_refined_roadmap(refined: dict[str, Any], fallback: dict[str, Any]
 
 
 def refine_roadmap_with_llm(roadmap: dict[str, Any]) -> dict[str, Any]:
-    client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
-    response = client.converse(
-        modelId=BEDROCK_MODEL_ID,
-        system=[{"text": SYSTEM_PROMPT}],
-        messages=[
-            {
-                "role": "user",
-                "content": [{"text": json.dumps(roadmap, ensure_ascii=False, indent=2)}],
-            }
-        ],
-        inferenceConfig={"maxTokens": 1600, "temperature": 0},
-    )
-    raw_text = _extract_text_from_converse_response(response)
-    refined = _parse_llm_json(raw_text)
-    return _normalize_refined_roadmap(refined, fallback=roadmap)
+    client = create_bedrock_runtime_client(region=AWS_REGION)
+    last_error: Exception | None = None
+
+    for attempt in range(2):
+        try:
+            response = client.converse(
+                modelId=BEDROCK_MODEL_ID,
+                system=[{"text": SYSTEM_PROMPT}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"text": json.dumps(roadmap, ensure_ascii=False, indent=2)}],
+                    }
+                ],
+                inferenceConfig={"maxTokens": 1600, "temperature": 0},
+            )
+            raw_text = _extract_text_from_converse_response(response)
+            refined = _parse_llm_json(raw_text)
+            return _normalize_refined_roadmap(refined, fallback=roadmap)
+        except Exception as exc:
+            last_error = exc
+            print(f"[roadmap_refiner] Attempt {attempt + 1} failed: {exc}")
+
+    assert last_error is not None
+    raise last_error

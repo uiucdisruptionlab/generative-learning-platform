@@ -8,12 +8,13 @@ import sys
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import boto3
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+from bedrock.client import create_bedrock_runtime_client
 
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -257,7 +258,7 @@ def call_bedrock_stream(
     user_message: str,
 ) -> str:
     """Call Bedrock with streaming and return the fully accumulated response text."""
-    client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    client = create_bedrock_runtime_client(region=AWS_REGION)
     response = client.invoke_model_with_response_stream(
         modelId=MODEL_ID,
         body=_bedrock_body(profile, history, user_message),

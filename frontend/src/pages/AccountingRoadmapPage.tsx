@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
 import { HOME_ROADMAP_PREVIEW } from '../data/homeRoadmapPreview'
-import { fetchRoadmap, mapLessonsToOutcomes } from '../api/roadmap'
+import { fetchRoadmap, mapLessonsToOutcomes, ROADMAP_TARGETS } from '../api/roadmap'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 
 export default function AccountingRoadmapPage() {
@@ -12,15 +12,16 @@ export default function AccountingRoadmapPage() {
   const [error, setError] = useState<string | null>(null)
 
   const roadmapData = HOME_ROADMAP_PREVIEW['/roadmap/accounting']
+  const target = ROADMAP_TARGETS.accounting
 
   useEffect(() => {
-    fetchRoadmap({ course: 'accounting' })
+    fetchRoadmap({ ...target, refine: true })
       .then((data) => {
         setOutcomes(mapLessonsToOutcomes(data.lessons))
         setError(null)
       })
       .catch((err) => setError(String(err)))
-  }, [])
+  }, [target])
 
   return (
     <AppLayout

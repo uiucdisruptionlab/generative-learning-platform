@@ -61,14 +61,17 @@ def process_pdf(
         records.append(record)
 
         if enable_graph_ingestion:
-            extracted = extract_concepts_from_chunk(
-                {
-                    "chunk_id": chunk_id,
-                    "text": chunk_text,
-                    "metadata": chunk.get("metadata", {}),
-                }
-            )
-            ingest_graph(course_chunk, extracted)
+            try:
+                extracted = extract_concepts_from_chunk(
+                    {
+                        "chunk_id": chunk_id,
+                        "text": chunk_text,
+                        "metadata": chunk.get("metadata", {}),
+                    }
+                )
+                ingest_graph(course_chunk, extracted)
+            except Exception as exc:
+                print(f"[graph] Skipping chunk {chunk_id}: {exc}")
 
     if records:
         pinecone_client.upsert(records)

@@ -20,6 +20,95 @@ STOPWORDS = {
     "with",
 }
 
+COURSE_SOURCE_PREFIXES = {
+    "accounting": ("ALec",),
+    "finance": ("FLec",),
+    "financing": ("FLec",),
+    "python": ("PLec",),
+    "deep_learning": ("DL_", "DLlec", "DL_lec"),
+    "dl": ("DL_", "DLlec", "DL_lec"),
+}
+
+LATE_TOPIC_KEYWORDS = {
+    "final",
+    "review",
+    "wrap up",
+    "wrap-up",
+    "summary",
+    "exam",
+    "midterm",
+    "practice exam",
+    "administration",
+}
+
+
+def _course_prefixes(course: str) -> tuple[str, ...]:
+    normalized = course.strip().lower()
+    return COURSE_SOURCE_PREFIXES.get(normalized, ())
+
+
+def _filter_graph_data_for_course(graph_data: dict[str, Any], course: str) -> dict[str, Any]:
+    if not course or course == "generated_course":
+        return graph_data
+
+    prefixes = _course_prefixes(course)
+    normalized_course = course.strip().lower()
+
+    chunk_links = graph_data.get("chunk_links", [])
+    filtered_chunk_links = []
+    for link in chunk_links:
+        course_id = str(link.get("course_id") or "").strip().lower()
+        lecture_id = str(link.get("lecture_id") or "")
+        chunk_id = str(link.get("chunk_id") or "")
+        chunk_source = str(link.get("chunk_source") or "")
+        source_candidates = [chunk_source, lecture_id, chunk_id, course_id]
+
+        if course_id and course_id == normalized_course:
+            filtered_chunk_links.append(link)
+            continue
+        if any(prefix and candidate.startswith(prefix) for candidate in source_candidates for prefix in prefixes):
+            filtered_chunk_links.append(link)
+
+    if not filtered_chunk_links and not prefixes:
+        return graph_data
+
+    if not filtered_chunk_links:
+        return {
+            "concepts": [],
+            "relationships": [],
+            "chunk_links": [],
+        }
+
+    valid_concepts = {link["concept_name"] for link in filtered_chunk_links}
+    filtered_relationships = [
+        rel for rel in graph_data.get("relationships", [])
+        if rel["from"] in valid_concepts and rel["to"] in valid_concepts
+    ]
+    filtered_concepts = [
+        concept for concept in graph_data.get("concepts", [])
+        if concept["name"] in valid_concepts
+    ]
+
+    return {
+        "concepts": filtered_concepts,
+        "relationships": filtered_relationships,
+        "chunk_links": filtered_chunk_links,
+    }
+
+
+def _chunk_position_from_id(chunk_id: str) -> float | None:
+    match = re.search(r"_p(?P<page>\d+)_c(?P<chunk>\d+)", chunk_id)
+    if not match:
+        return None
+    page = int(match.group("page"))
+    chunk = int(match.group("chunk"))
+    return float(page) + (chunk / 1000.0)
+
+
+def _looks_like_late_topic(title: str, concept_names: list[str]) -> bool:
+    haystacks = [title.lower(), *[name.lower() for name in concept_names]]
+    return any(keyword in haystack for haystack in haystacks for keyword in LATE_TOPIC_KEYWORDS)
+
 
 def _canonicalize_name(name: str) -> str:
     lowered = name.lower().strip()
@@ -402,11 +491,18 @@ def _build_rough_roadmap(graph_data: dict[str, Any], course: str) -> dict[str, A
             for concept_name in component
             for chunk_id in canonical_chunk_ids.get(concept_name, set())
         })
+        chunk_positions = [
+            position
+            for chunk_id in chunk_ids
+            for position in [_chunk_position_from_id(chunk_id)]
+            if position is not None
+        ]
         lecture_ids = sorted({
             lecture_id
             for concept_name in component
             for lecture_id in canonical_lecture_ids.get(concept_name, set())
         })
+        late_topic_penalty = 10_000.0 if _looks_like_late_topic(title, component) else 0.0
 
         lesson = {
             "lesson_id": lesson_id,
@@ -428,7 +524,9 @@ def _build_rough_roadmap(graph_data: dict[str, Any], course: str) -> dict[str, A
 
         for concept_name in component:
             concept_to_lesson[concept_name] = lesson_id
-        lesson_order_hint[lesson_id] = average_chunk_order
+        lesson_order_hint[lesson_id] = (
+            (sum(chunk_positions) / len(chunk_positions)) if chunk_positions else average_chunk_order
+        ) + late_topic_penalty
         lesson_titles[lesson_id] = title
 
     lesson_edges: dict[str, set[str]] = defaultdict(set)
@@ -471,6 +569,7 @@ def build_roadmap_from_graph_data(
     course: str = "generated_course",
     refine_with_llm: bool = False,
 ) -> dict[str, Any]:
+    graph_data = _filter_graph_data_for_course(graph_data, course)
     roadmap = _build_rough_roadmap(graph_data, course=course)
 
     if refine_with_llm:

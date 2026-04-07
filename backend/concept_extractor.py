@@ -3,7 +3,7 @@ import os
 import re
 from typing import Any
 
-import boto3
+from bedrock.client import create_bedrock_runtime_client
 
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 BEDROCK_MODEL_ID = os.getenv(
@@ -87,7 +87,51 @@ def _parse_llm_json(raw_text: str) -> dict[str, Any]:
         return f'"{inner}"'
 
     cleaned = re.sub(r'"((?:[^"\\]|\\.)*)"', _escape_string, candidate, flags=re.DOTALL)
-    return json.loads(cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Bedrock occasionally emits unescaped quotes inside string values.
+    # Fall back to extracting the fields we care about instead of failing the chunk.
+    chunk_match = re.search(r'"chunk_id"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+    chunk_id = chunk_match.group(1) if chunk_match else ""
+
+    concepts: list[dict[str, str]] = []
+    for concept_match in re.finditer(
+        r'\{\s*"name"\s*:\s*"(?P<name>(?:[^"\\]|\\.)*)"\s*,\s*"description"\s*:\s*"(?P<description>.*?)"\s*\}',
+        cleaned,
+        flags=re.DOTALL,
+    ):
+        concepts.append(
+            {
+                "name": concept_match.group("name"),
+                "description": concept_match.group("description").replace('\\"', '"').strip(),
+            }
+        )
+
+    relationships: list[dict[str, str]] = []
+    for rel_match in re.finditer(
+        r'\{\s*"from"\s*:\s*"(?P<from>(?:[^"\\]|\\.)*)"\s*,\s*"to"\s*:\s*"(?P<to>(?:[^"\\]|\\.)*)"\s*,\s*"type"\s*:\s*"(?P<type>(?:[^"\\]|\\.)*)"\s*\}',
+        cleaned,
+        flags=re.DOTALL,
+    ):
+        relationships.append(
+            {
+                "from": rel_match.group("from"),
+                "to": rel_match.group("to"),
+                "type": rel_match.group("type"),
+            }
+        )
+
+    if concepts or relationships or chunk_id:
+        return {
+            "chunk_id": chunk_id,
+            "concepts": concepts,
+            "relationships": relationships,
+        }
+
+    raise ValueError(f"Unable to parse model response as graph JSON: {raw_text}")
 
 
 def _coerce_chunk(chunk: Any, default_chunk_id: str | None = None) -> dict[str, Any]:
@@ -202,7 +246,7 @@ def extract_concepts_from_chunk(chunk: Any) -> dict[str, Any]:
         "metadata": metadata,
     }
 
-    client = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+    client = create_bedrock_runtime_client(region=AWS_REGION)
     response = client.converse(
         modelId=BEDROCK_MODEL_ID,
         system=[{"text": SYSTEM_PROMPT}],

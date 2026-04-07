@@ -2,24 +2,29 @@ import { useState, useEffect } from 'react'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
 import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
-import { fetchRoadmap, mapLessonsToOutcomes } from '../api/roadmap'
+import {
+  fetchRoadmap,
+  mapLessonsToOutcomes,
+  ROADMAP_TARGETS,
+  type FrontendRoadmapTarget,
+} from '../api/roadmap'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 
 export default function RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [outcomes, setOutcomes] = useState<HomeRoadmapOutcome[] | null>(null)
-  const [course, setCourse] = useState<string>('accounting')
+  const [target, setTarget] = useState<FrontendRoadmapTarget>(ROADMAP_TARGETS.accounting)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchRoadmap({ course })
+    fetchRoadmap({ ...target, refine: true })
       .then((data) => {
         setOutcomes(mapLessonsToOutcomes(data.lessons))
         setError(null)
       })
       .catch((err) => setError(String(err)))
-  }, [course])
+  }, [target])
 
   const outcomeCount = outcomes ? `${outcomes.length} learning outcomes` : '...'
 
@@ -33,11 +38,11 @@ export default function RoadmapPage() {
       description={`${outcomeCount} · Personalized for you`}
       action={<RoadmapCourseSelect variant="header" onValueChange={(path) => {
         if (path === '/roadmap/accounting' || path === '/roadmap') {
-          setCourse('accounting')
+          setTarget(ROADMAP_TARGETS.accounting)
         } else if (path === '/roadmap/python' || path === '/roadmap/cs101') {
-          setCourse('python')
+          setTarget(ROADMAP_TARGETS.python)
         } else if (path === '/roadmap/financing') {
-          setCourse('financing')
+          setTarget(ROADMAP_TARGETS.financing)
         }
       }} />}
     >

@@ -1,14 +1,15 @@
 import os
 import json
-import boto3
 from typing import List
+
+from bedrock.client import create_bedrock_runtime_client
 
 
 class BedrockEmbedder:
 
     def __init__(self, region: str | None = None):
         region = region or os.getenv("AWS_REGION", "us-east-1")
-        self.client = boto3.client("bedrock-runtime", region_name=region)
+        self.client = create_bedrock_runtime_client(region=region)
 
     def embed_data(self, text:str) -> List[float]:
         """
@@ -43,4 +44,3 @@ class BedrockEmbedder:
             image_bytes = f.read()
         
         return self.embed_image(image_bytes)
-
