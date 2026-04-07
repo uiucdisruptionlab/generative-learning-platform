@@ -2,28 +2,24 @@ import { useState, useEffect } from 'react'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
 import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
-import { fetchRoadmap } from '../api/roadmap'
+import { fetchRoadmap, mapLessonsToOutcomes } from '../api/roadmap'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
-
-function mapToOutcomes(lessons: { lesson_id: string; title: string; prerequisites: string[] }[]): HomeRoadmapOutcome[] {
-  return lessons.map((lesson, index) => ({
-    id: lesson.lesson_id,
-    title: lesson.title,
-    status: index === 0 ? 'current' : 'upcoming',
-  }))
-}
 
 export default function RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [outcomes, setOutcomes] = useState<HomeRoadmapOutcome[] | null>(null)
+  const [course, setCourse] = useState<string>('accounting')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchRoadmap()
-      .then((data) => setOutcomes(mapToOutcomes(data.lessons)))
+    fetchRoadmap({ course })
+      .then((data) => {
+        setOutcomes(mapLessonsToOutcomes(data.lessons))
+        setError(null)
+      })
       .catch((err) => setError(String(err)))
-  }, [])
+  }, [course])
 
   const outcomeCount = outcomes ? `${outcomes.length} learning outcomes` : '...'
 
@@ -35,7 +31,15 @@ export default function RoadmapPage() {
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
       title="Financial Accounting"
       description={`${outcomeCount} · Personalized for you`}
-      action={<RoadmapCourseSelect variant="header" />}
+      action={<RoadmapCourseSelect variant="header" onValueChange={(path) => {
+        if (path === '/roadmap/accounting' || path === '/roadmap') {
+          setCourse('accounting')
+        } else if (path === '/roadmap/python' || path === '/roadmap/cs101') {
+          setCourse('python')
+        } else if (path === '/roadmap/financing') {
+          setCourse('financing')
+        }
+      }} />}
     >
       <div className="max-w-[800px] w-full min-w-0 mx-auto px-8 lg:px-12 py-8 lg:py-12">
         {error && (

@@ -5,12 +5,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pc_client.models.chunks import CourseChunk
 from graphdb.neo4j_client import (
+    create_course,
     get_all_concepts,
+    create_lecture,
     create_chunk,
     create_concept,
     create_relationship,
+    link_course_to_lecture,
+    link_lecture_to_chunk,
     link_chunk_to_concept,
 )
+
+
+def _derive_course_id(chunk: CourseChunk) -> str:
+    course_id = getattr(chunk.metadata, "course_id", None)
+    if course_id:
+        return str(course_id)
+
+    offering_id = chunk.metadata.offering_id
+    if "_" in offering_id:
+        return offering_id.split("_", 1)[0]
+
+    letters = "".join(ch for ch in offering_id if ch.isalpha())
+    return letters or offering_id
 
 
 def ingest(chunk: CourseChunk, extracted: dict) -> None:
@@ -43,6 +60,14 @@ def ingest(chunk: CourseChunk, extracted: dict) -> None:
         order=chunk.metadata.chunk_number,
     )
     print(f"[neo4j] Chunk node merged: {chunk.id}")
+
+    course_id = _derive_course_id(chunk)
+    lecture_id = chunk.metadata.offering_id
+    create_course(course_id)
+    create_lecture(lecture_id, course_id=course_id, title=chunk.metadata.topic)
+    link_course_to_lecture(course_id, lecture_id)
+    link_lecture_to_chunk(lecture_id, chunk.id)
+    print(f"[neo4j] Course/Lecture structure merged: {course_id} -> {lecture_id} -> {chunk.id}")
 
 
     # 3. Create concepts (reuse existing ones where name matches)         

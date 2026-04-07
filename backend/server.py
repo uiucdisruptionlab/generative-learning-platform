@@ -10,7 +10,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import boto3
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -315,10 +315,16 @@ def _process_llm_response(
 # ---------------------------------------------------------------------------
 
 @app.get("/roadmap")
-def get_roadmap():
-    from graphdb.roadmap_builder import build_roadmap
+def get_roadmap(
+    course: str = Query(default="accounting"),
+    lecture_id: str | None = Query(default=None),
+    refine: bool = Query(default=False),
+):
+    from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
     try:
-        return build_roadmap(course="accounting")
+        if lecture_id:
+            return build_roadmap_for_lecture(lecture_id, course=course, refine_with_llm=refine)
+        return build_roadmap(course=course, refine_with_llm=refine)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
