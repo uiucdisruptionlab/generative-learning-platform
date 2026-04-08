@@ -581,11 +581,17 @@ def build_roadmap_from_graph_data(
 
 
 def build_roadmap(course: str = "generated_course", refine_with_llm: bool | None = None) -> dict[str, Any]:
-    from graphdb.neo4j_client import get_concept_graph
+    from graphdb.neo4j_client import get_concept_graph, get_concept_graph_by_course
 
     if refine_with_llm is None:
         refine_with_llm = os.getenv("ENABLE_ROADMAP_REFINEMENT", "false").lower() == "true"
-    return build_roadmap_from_graph_data(get_concept_graph(), course=course, refine_with_llm=refine_with_llm)
+
+    if course and course != "generated_course":
+        graph_data = get_concept_graph_by_course(course)
+    else:
+        graph_data = get_concept_graph()
+
+    return build_roadmap_from_graph_data(graph_data, course=course, refine_with_llm=refine_with_llm)
 
 
 def build_roadmap_for_lecture(

@@ -10,16 +10,35 @@ import {
 } from '../api/roadmap'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 
+const COURSE_LABELS: Record<string, { title: string; description: string }> = {
+  accounting: { title: 'Financial Accounting', description: 'Personalized for you' },
+  python: { title: 'Intro to Python', description: 'Personalized for you' },
+  financing: { title: 'Financing Economic Development', description: 'Personalized for you' },
+}
+
+function getCourseKey(target: FrontendRoadmapTarget): string {
+  const course = target.course.toLowerCase()
+  if (course.includes('alec') || course === 'accounting') return 'accounting'
+  if (course === 'python') return 'python'
+  if (course === 'financing') return 'financing'
+  return 'accounting'
+}
+
 export default function RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [outcomes, setOutcomes] = useState<HomeRoadmapOutcome[] | null>(null)
   const [target, setTarget] = useState<FrontendRoadmapTarget>(ROADMAP_TARGETS.accounting)
+  const [selectedPath, setSelectedPath] = useState('/roadmap')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const courseKey = getCourseKey(target)
+  const courseLabel = COURSE_LABELS[courseKey] ?? COURSE_LABELS.accounting
+
   useEffect(() => {
     setLoading(true)
+    setOutcomes(null)
     fetchRoadmap({ ...target, refine: true })
       .then((data) => {
         setOutcomes(mapLessonsToOutcomes(data.lessons))
@@ -37,9 +56,10 @@ export default function RoadmapPage() {
       onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       settingsOpen={settingsOpen}
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
-      title="Financial Accounting"
-      description={`${outcomeCount} · Personalized for you`}
-      action={<RoadmapCourseSelect variant="header" onValueChange={(path) => {
+      title={courseLabel.title}
+      description={`${outcomeCount} · ${courseLabel.description}`}
+      action={<RoadmapCourseSelect variant="header" value={selectedPath} onValueChange={(path) => {
+        setSelectedPath(path)
         if (path === '/roadmap/accounting' || path === '/roadmap') {
           setTarget(ROADMAP_TARGETS.accounting)
         } else if (path === '/roadmap/python' || path === '/roadmap/cs101') {
@@ -61,7 +81,10 @@ export default function RoadmapPage() {
             <p className="text-sm">Building your personalized roadmap…</p>
           </div>
         ) : (
-          <LearningRoadmap outcomes={outcomes ?? undefined} />
+          <LearningRoadmap
+            outcomes={outcomes ?? undefined}
+            startHereTo={outcomes && outcomes.length > 0 ? `/lesson/${outcomes[0].id}?course=${courseKey}` : '#'}
+          />
         )}
 
         <button

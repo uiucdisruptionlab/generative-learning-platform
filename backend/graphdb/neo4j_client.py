@@ -198,6 +198,48 @@ def link_chunk_to_concept(chunk_id: str, concept_name: str) -> None:
         )
 
 
+def get_concept_graph_by_course(course_id: str) -> dict:
+    with _driver() as driver:
+        concept_records, _, _ = driver.execute_query(
+            """
+            MATCH (co:Course {id: $course_id})-[:HAS_LECTURE]->(le:Lecture)-[:HAS_CHUNK]->(ch:Chunk)-[:CONTAINS]->(c:Concept)
+            RETURN DISTINCT c.name AS name, c.description AS description
+            """,
+            course_id=course_id,
+            database_=_DATABASE,
+        )
+        relationship_records, _, _ = driver.execute_query(
+            """
+            MATCH (co:Course {id: $course_id})-[:HAS_LECTURE]->(le:Lecture)-[:HAS_CHUNK]->(:Chunk)-[:CONTAINS]->(a:Concept)-[r]->(b:Concept)
+            WHERE EXISTS {
+                MATCH (:Course {id: $course_id})-[:HAS_LECTURE]->(:Lecture)-[:HAS_CHUNK]->(:Chunk)-[:CONTAINS]->(b)
+            }
+            RETURN DISTINCT a.name AS from, type(r) AS type, b.name AS to
+            """,
+            course_id=course_id,
+            database_=_DATABASE,
+        )
+        chunk_records, _, _ = driver.execute_query(
+            """
+            MATCH (co:Course {id: $course_id})-[:HAS_LECTURE]->(le:Lecture)-[:HAS_CHUNK]->(ch:Chunk)-[:CONTAINS]->(c:Concept)
+            RETURN ch.id AS chunk_id,
+                   ch.source AS chunk_source,
+                   le.id AS lecture_id,
+                   co.id AS course_id,
+                   ch.order AS chunk_order,
+                   c.name AS concept_name
+            """,
+            course_id=course_id,
+            database_=_DATABASE,
+        )
+
+    return {
+        "concepts": [record.data() for record in concept_records],
+        "relationships": [record.data() for record in relationship_records],
+        "chunk_links": [record.data() for record in chunk_records],
+    }
+
+
 def get_concept_graph() -> dict:
     with _driver() as driver:
         concept_records, _, _ = driver.execute_query(

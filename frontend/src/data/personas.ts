@@ -52,4 +52,4 @@ export const PERSONAS: Record<string, Persona> = {
   },
 }
 
-export const DEFAULT_PERSONA = 'demo'
+export const DEFAULT_PERSONA = 'charles'

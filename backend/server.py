@@ -315,20 +315,33 @@ def _process_llm_response(
 # Routes
 # ---------------------------------------------------------------------------
 
-ROADMAP_CACHE_PATH = Path(__file__).parent / "roadmap_cache.json"
+ROADMAP_CACHE_DIR = Path(__file__).parent
+
+COURSE_KEY_MAP: dict[str, str] = {
+    "ALecFinal": "accounting",
+    "accounting": "accounting",
+    "python": "python",
+    "financing": "financing",
+}
 
 
-def _load_cache() -> dict | None:
-    if ROADMAP_CACHE_PATH.exists():
+def _course_cache_path(course: str) -> Path:
+    key = COURSE_KEY_MAP.get(course, course)
+    return ROADMAP_CACHE_DIR / f"roadmap_cache_{key}.json"
+
+
+def _load_roadmap_cache(course: str) -> dict | None:
+    path = _course_cache_path(course)
+    if path.exists():
         try:
-            return json.loads(ROADMAP_CACHE_PATH.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             pass
     return None
 
 
-def _save_cache(data: dict) -> None:
-    ROADMAP_CACHE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+def _save_roadmap_cache(course: str, data: dict) -> None:
+    _course_cache_path(course).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _build_and_cache(course: str, lecture_id: str | None) -> dict:
@@ -337,7 +350,7 @@ def _build_and_cache(course: str, lecture_id: str | None) -> dict:
         data = build_roadmap_for_lecture(lecture_id, course=course, refine_with_llm=True)
     else:
         data = build_roadmap(course=course, refine_with_llm=True)
-    _save_cache(data)
+    _save_roadmap_cache(course, data)
     return data
 
 
@@ -346,12 +359,14 @@ def get_roadmap(
     course: str = Query(default="accounting"),
     lecture_id: str | None = Query(default=None),
 ):
-    cached = _load_cache()
+    cached = _load_roadmap_cache(course)
     if cached:
         return cached
     try:
         return _build_and_cache(course, lecture_id)
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -363,6 +378,62 @@ def rebuild_roadmap(
     try:
         return _build_and_cache(course, lecture_id)
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+LESSON_CACHE_DIR = Path(__file__).parent / "lesson_cache"
+
+
+def _get_lesson_cache_path(persona_id: str, lesson_id: str, course: str | None = None) -> Path:
+    folder = f"{persona_id}_{course}" if course else persona_id
+    return LESSON_CACHE_DIR / folder / f"{lesson_id}.json"
+
+
+def _load_lesson_cache(persona_id: str, lesson_id: str, course: str | None = None) -> dict | None:
+    path = _get_lesson_cache_path(persona_id, lesson_id, course)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return None
+
+
+def _save_lesson_cache(persona_id: str, lesson_id: str, data: dict, course: str | None = None) -> None:
+    path = _get_lesson_cache_path(persona_id, lesson_id, course)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | None = None) -> dict:
+    from lesson_generator import generate_lesson
+    data = generate_lesson(lesson_id=lesson_id, persona_id=persona_id, course_override=course)
+    _save_lesson_cache(persona_id, lesson_id, data, course)
+    return data
+
+
+@app.get("/lesson/{lesson_id}")
+def get_lesson(lesson_id: str, persona: str = Query(default="charles"), course: str | None = Query(default=None)):
+    cached = _load_lesson_cache(persona, lesson_id, course)
+    if cached:
+        return cached
+    try:
+        return _generate_and_cache_lesson(lesson_id, persona, course)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/{lesson_id}/rebuild")
+def rebuild_lesson(lesson_id: str, persona: str = Query(default="charles"), course: str | None = Query(default=None)):
+    try:
+        return _generate_and_cache_lesson(lesson_id, persona, course)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -410,6 +481,96 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
         # Final event carries the full profile and done flag
         yield _sse({"type": "result", "message": assistant_reply, "profile": updated_profile, "done": done})
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+class LessonChatMessage(BaseModel):
+    role: str
+    content: str
+
+class LessonChatRequest(BaseModel):
+    lesson_id: str
+    persona: str
+    messages: List[LessonChatMessage]
+
+
+@app.post("/lesson/chat")
+async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
+    cached = _load_lesson_cache(req.persona, req.lesson_id)
+    lesson_context = ""
+    if cached:
+        title = cached.get("title", "")
+        overview = cached.get("overview", "")
+        concepts = ", ".join(c["name"] for c in cached.get("concepts", []) if isinstance(c, dict))
+        lesson_context = f"Lesson: {title}\nOverview: {overview}\nConcepts covered: {concepts}"
+
+    from personas import get_persona
+    try:
+        persona = get_persona(req.persona)
+        persona_context = (
+            f"Student name: {persona['name']}\n"
+            f"Major: {persona['major']}\n"
+            f"Familiarity: {persona['familiarity']}\n"
+            f"Learning style: {persona['learning_style']}\n"
+            f"Notes: {persona['notes']}"
+        )
+    except Exception:
+        persona_context = ""
+
+    system_prompt = f"""You are a helpful, encouraging teaching assistant guiding a student through a lesson.
+Your job is to answer questions, clarify concepts, and help the student understand the material deeply.
+Always relate your answers back to the lesson context. Be concise but thorough.
+Adapt your tone and depth to the student's profile.
+
+{persona_context}
+
+{lesson_context}""".strip()
+
+    messages = [m.model_dump() for m in req.messages]
+    user_messages = [m for m in messages if m["role"] == "user"]
+
+    async def generate() -> AsyncGenerator[str, None]:
+        if not user_messages:
+            greeting = "Hi! I'm your lesson assistant. Ask me anything about this lesson and I'll help you understand it."
+            for word in greeting.split():
+                yield _sse({"type": "chunk", "text": word + " "})
+                await asyncio.sleep(0.04)
+            yield _sse({"type": "done", "message": greeting})
+            return
+
+        latest = user_messages[-1]["content"]
+        history_for_bedrock = [
+            {"role": m["role"], "content": [{"type": "text", "text": m["content"]}]}
+            for m in messages[:-1]
+        ]
+
+        client = create_bedrock_runtime_client(region=AWS_REGION)
+
+        try:
+            response = await asyncio.to_thread(
+                client.converse,
+                modelId=MODEL_ID,
+                system=[{"text": system_prompt}],
+                messages=history_for_bedrock + [
+                    {"role": "user", "content": [{"type": "text", "text": latest}]}
+                ],
+                inferenceConfig={"maxTokens": 1024, "temperature": 0.5},
+            )
+            reply = "".join(
+                block["text"]
+                for block in response["output"]["message"]["content"]
+                if "text" in block
+            ).strip()
+        except Exception as exc:
+            yield _sse({"type": "error", "message": str(exc)})
+            return
+
+        for i, word in enumerate(reply.split()):
+            yield _sse({"type": "chunk", "text": word + (" " if i < len(reply.split()) - 1 else "")})
+            await asyncio.sleep(0.03)
+
+        yield _sse({"type": "done", "message": reply})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 

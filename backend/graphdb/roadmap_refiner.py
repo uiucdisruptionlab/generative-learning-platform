@@ -155,9 +155,23 @@ def _normalize_refined_roadmap(refined: dict[str, Any], fallback: dict[str, Any]
     }
 
 
+MAX_LESSONS_FOR_REFINEMENT = 20
+
+
+def _truncate_roadmap(roadmap: dict[str, Any]) -> dict[str, Any]:
+    """Cap the number of lessons sent to the LLM to avoid token limit truncation."""
+    lessons = roadmap.get("lessons", [])
+    if len(lessons) <= MAX_LESSONS_FOR_REFINEMENT:
+        return roadmap
+    print(f"[roadmap_refiner] Truncating {len(lessons)} lessons to {MAX_LESSONS_FOR_REFINEMENT} for refinement")
+    truncated_lessons = lessons[:MAX_LESSONS_FOR_REFINEMENT]
+    return {**roadmap, "lessons": truncated_lessons, "lesson_count": len(truncated_lessons)}
+
+
 def refine_roadmap_with_llm(roadmap: dict[str, Any]) -> dict[str, Any]:
     client = create_bedrock_runtime_client(region=AWS_REGION)
     last_error: Exception | None = None
+    roadmap = _truncate_roadmap(roadmap)
 
     for attempt in range(2):
         try:

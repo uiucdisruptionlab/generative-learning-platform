@@ -19,22 +19,21 @@ def process_pdf(
     pinecone_api_key: str,
     unstructured_api_key: str,
     enable_graph_ingestion: bool = False,
+    graph_only: bool = False,
+    namespace: str = "DL_Transcripts",
 ):
     """
     Orchestrates the full pipeline: extract -> chunk -> embed -> upsert.
 
     When enable_graph_ingestion is True, each chunk is also passed through the
     Bedrock concept extractor and written to Neo4j.
+
+    When graph_only is True, skips embedding and Pinecone upsert entirely —
+    useful when chunks are already in Pinecone and you only need the Neo4j graph.
     """
-  
+
     extractor = PDFTextExtractor(unstructured_api_key)
     chunker = TextChunker(chunk_size=500, chunk_overlap=100)
-    embedder = BedrockEmbedder()
-    pinecone_client = PineconeClient(
-        api_key=pinecone_api_key,
-        index_name=pinecone_index,
-        namespace="DL_Transcripts"
-    )
 
     texts = extractor.extract_texts(pdf_path)
     print(f"Extracted {len(texts)} text elements")
@@ -42,11 +41,19 @@ def process_pdf(
     chunks = chunker.chunk_texts(texts)
     print(f"Created {len(chunks)} chunks")
 
-    records = []
     offering_id = os.path.splitext(os.path.basename(pdf_path))[0]
+
+    if not graph_only:
+        embedder = BedrockEmbedder()
+        pinecone_client = PineconeClient(
+            api_key=pinecone_api_key,
+            index_name=pinecone_index,
+            namespace=namespace,
+        )
+
+    records = []
     for chunk in chunks:
         chunk_text = chunk["chunk"]
-        vec = embedder.embed_data(chunk_text)
         chunk_index = chunk["metadata"].get("chunk_index", 0)
         chunk_id = f"{offering_id}_p{chunk['metadata'].get('page_number', 1)}_c{chunk_index}"
         metadata = ChunkMetadata(
@@ -56,9 +63,10 @@ def process_pdf(
             text=chunk_text,
             chunk_number=chunk_index + 1,
         )
-        course_chunk = CourseChunk(id=chunk_id, values=vec, metadata=metadata)
-        record = course_chunk.to_pinecone_record()
-        records.append(record)
+        course_chunk = CourseChunk(id=chunk_id, values=[] if graph_only else embedder.embed_data(chunk_text), metadata=metadata)
+
+        if not graph_only:
+            records.append(course_chunk.to_pinecone_record())
 
         if enable_graph_ingestion:
             try:
@@ -73,11 +81,12 @@ def process_pdf(
             except Exception as exc:
                 print(f"[graph] Skipping chunk {chunk_id}: {exc}")
 
-    if records:
-        pinecone_client.upsert(records)
-        print(f"Upserted {len(records)} records to Pinecone")
-    else:
-        print("No records to upsert")
+    if not graph_only:
+        if records:
+            pinecone_client.upsert(records)
+            print(f"Upserted {len(records)} records to Pinecone")
+        else:
+            print("No records to upsert")
 
 
 def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key):
@@ -107,23 +116,25 @@ def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_a
 
 if __name__ == "__main__":
     _script_dir = os.path.dirname(os.path.abspath(__file__))
-    folder_path = os.path.join(_script_dir, "sample_data",)
-    file_path = os.path.join(_script_dir, "sample_data", "accounting", "ALecFinal.pdf")
     pinecone_index = os.getenv("PINECONE_INDEX")
     pinecone_api_key = os.getenv("PINECONE_API_KEY")
     unstructured_api_key = os.getenv("UNSTRUCTURED_API_KEY")
     enable_graph_ingestion = os.getenv("ENABLE_GRAPH_INGESTION", "false").lower() == "true"
+    graph_only = os.getenv("GRAPH_ONLY", "false").lower() == "true"
 
-    if not pinecone_api_key:
-        raise RuntimeError("PINECONE_API_KEY environment variable is required.")
     if not unstructured_api_key:
         raise RuntimeError("UNSTRUCTURED_API_KEY environment variable is required.")
+    if not graph_only and not pinecone_api_key:
+        raise RuntimeError("PINECONE_API_KEY environment variable is required.")
 
-    # process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key)
+    # --- Configure which file/folder to process ---
+    file_path = os.path.join(_script_dir, "sample_data", "accounting", "ALecFinal.pdf")
+
     process_pdf(
         file_path,
         pinecone_index,
         pinecone_api_key,
         unstructured_api_key,
         enable_graph_ingestion=enable_graph_ingestion,
+        graph_only=graph_only,
     )

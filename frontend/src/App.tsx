@@ -18,6 +18,7 @@ import ECON201GDPPage from './pages/ECON201GDPPage'
 import PythonRoadmapPage from './pages/PythonRoadmapPage'
 import FinancingRoadmapPage from './pages/FinancingRoadmapPage'
 import AccountingRoadmapPage from './pages/AccountingRoadmapPage'
+import LessonPage from './pages/LessonPage'
 
 function App() {
   return (
@@ -42,6 +43,7 @@ function App() {
         <Route path="/roadmap/python" element={<PythonRoadmapPage />} />
         <Route path="/roadmap/financing" element={<FinancingRoadmapPage />} />
         <Route path="/roadmap/accounting" element={<AccountingRoadmapPage />} />
+        <Route path="/lesson/:lessonId" element={<LessonPage />} />
       </Routes>
     </PersonaProvider>
   )
