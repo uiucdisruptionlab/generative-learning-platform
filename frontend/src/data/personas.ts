@@ -53,3 +53,8 @@ export const PERSONAS: Record<string, Persona> = {
 }
 
 export const DEFAULT_PERSONA = 'charles'
+
+export function getSidebarProfile(personaId: string): Persona | null {
+  if (personaId === 'demo') return null
+  return PERSONAS[personaId] ?? null
+}

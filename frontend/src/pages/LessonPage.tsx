@@ -4,70 +4,7 @@ import AppLayout from '../components/AppLayout'
 import { usePersona } from '../contexts/PersonaContext'
 import { fetchLesson, streamLessonChat, type LessonContent, type LessonQuestion, type ChatMessage } from '../api/lesson'
 
-// ---------- Step indicator ----------
-
-function StepIndicator({ steps, current, onSelect }: {
-  steps: string[]
-  current: number
-  onSelect: (i: number) => void
-}) {
-  return (
-    <div className="flex items-center gap-1 mb-8 flex-wrap">
-      {steps.map((title, i) => (
-        <button
-          key={i}
-          type="button"
-          onClick={() => onSelect(i)}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-            i === current
-              ? 'bg-primary text-white shadow-md'
-              : i < current
-              ? 'bg-primary/20 text-primary dark:text-primary-light'
-              : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
-          }`}
-        >
-          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
-            i === current ? 'bg-white/20' : i < current ? 'bg-primary/30' : 'bg-slate-200 dark:bg-slate-700'
-          }`}>
-            {i < current ? '✓' : i + 1}
-          </span>
-          <span className="hidden sm:inline">{title}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ---------- Step content ----------
-
-function StepCard({ step }: { step: LessonContent['steps'][0] }) {
-  const borderColor = step.type === 'example'
-    ? 'border-amber-200/80 dark:border-amber-800/40'
-    : step.type === 'summary'
-    ? 'border-primary/30 dark:border-primary/20'
-    : 'border-slate-200 dark:border-slate-700'
-
-  const badge = step.type === 'example'
-    ? { label: 'Example', icon: 'lightbulb', color: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20' }
-    : step.type === 'summary'
-    ? { label: 'Summary', icon: 'summarize', color: 'text-primary bg-emerald-50 dark:bg-emerald-900/20' }
-    : { label: 'Concept', icon: 'school', color: 'text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800' }
-
-  return (
-    <div className={`rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 ${borderColor} shadow-soft`}>
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${badge.color}`}>
-          <span className="material-symbols-outlined text-sm">{badge.icon}</span>
-          {badge.label}
-        </span>
-      </div>
-      <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-3">{step.title}</h3>
-      <p className="text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line">{step.content}</p>
-    </div>
-  )
-}
-
-// ---------- Videos ----------
+// ---------- Video card ----------
 
 function VideoCard({ video }: { video: LessonContent['videos'][0] }) {
   return (
@@ -77,11 +14,7 @@ function VideoCard({ video }: { video: LessonContent['videos'][0] }) {
       rel="noopener noreferrer"
       className="flex gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 p-3 hover:border-primary/50 transition-colors"
     >
-      <img
-        src={video.thumbnail}
-        alt={video.title}
-        className="w-24 h-16 rounded-lg object-cover flex-shrink-0"
-      />
+      <img src={video.thumbnail} alt={video.title} className="w-24 h-16 rounded-lg object-cover flex-shrink-0" />
       <div className="min-w-0">
         <p className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2">{video.title}</p>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{video.channel}</p>
@@ -91,7 +24,7 @@ function VideoCard({ video }: { video: LessonContent['videos'][0] }) {
   )
 }
 
-// ---------- Questions ----------
+// ---------- Question card ----------
 
 function QuestionCard({ question, index }: { question: LessonQuestion; index: number }) {
   const [selected, setSelected] = useState<string | null>(null)
@@ -110,11 +43,7 @@ function QuestionCard({ question, index }: { question: LessonQuestion; index: nu
     setSubmitted(true)
   }
 
-  const handleRetry = () => {
-    setSelected(null)
-    setFillValue('')
-    setSubmitted(false)
-  }
+  const handleRetry = () => { setSelected(null); setFillValue(''); setSubmitted(false) }
 
   return (
     <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 border-slate-200 dark:border-slate-700 shadow-soft">
@@ -130,40 +59,27 @@ function QuestionCard({ question, index }: { question: LessonQuestion; index: nu
             const isAnswer = submitted && opt === question.answer
             const isWrong = submitted && isSelected && opt !== question.answer
             return (
-              <button
-                key={opt}
-                type="button"
-                disabled={submitted}
-                onClick={() => setSelected(opt)}
+              <button key={opt} type="button" disabled={submitted} onClick={() => setSelected(opt)}
                 className={`w-full text-left px-4 py-3 rounded-xl border-2 text-sm transition-all ${
-                  isAnswer
-                    ? 'border-primary bg-emerald-50 dark:bg-emerald-900/20 text-primary font-semibold'
-                    : isWrong
-                    ? 'border-red-400 bg-red-50 dark:bg-red-900/20 text-red-600'
-                    : isSelected
-                    ? 'border-primary bg-primary/5 text-slate-900 dark:text-white'
-                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-primary/40'
+                  isAnswer ? 'border-primary bg-emerald-50 dark:bg-emerald-900/20 text-primary font-semibold'
+                  : isWrong ? 'border-red-400 bg-red-50 dark:bg-red-900/20 text-red-600'
+                  : isSelected ? 'border-primary bg-primary/5 text-slate-900 dark:text-white'
+                  : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-primary/40'
                 }`}
-              >
-                {opt}
-              </button>
+              >{opt}</button>
             )
           })}
         </div>
       )}
 
       {question.type === 'fill_in_the_blank' && (
-        <input
-          type="text"
-          value={fillValue}
-          disabled={submitted}
+        <input type="text" value={fillValue} disabled={submitted}
           onChange={(e) => setFillValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
           placeholder="Type your answer…"
           className={`w-full px-4 py-3 rounded-xl border-2 text-sm mb-4 focus:outline-none transition-colors ${
             submitted
-              ? isCorrect
-                ? 'border-primary bg-emerald-50 dark:bg-emerald-900/20 text-primary'
+              ? isCorrect ? 'border-primary bg-emerald-50 dark:bg-emerald-900/20 text-primary'
                 : 'border-red-400 bg-red-50 dark:bg-red-900/20 text-red-600'
               : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:border-primary'
           }`}
@@ -176,21 +92,15 @@ function QuestionCard({ question, index }: { question: LessonQuestion; index: nu
           <p className="text-xs opacity-80">{question.explanation}</p>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={handleSubmit}
-          className="px-5 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-light transition-colors"
-        >
+        <button type="button" onClick={handleSubmit}
+          className="px-5 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-light transition-colors">
           Submit
         </button>
       )}
 
       {submitted && (
-        <button
-          type="button"
-          onClick={handleRetry}
-          className="mt-2 px-4 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-500 hover:border-primary/40 transition-colors"
-        >
+        <button type="button" onClick={handleRetry}
+          className="mt-2 px-4 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-500 hover:border-primary/40 transition-colors">
           Try again
         </button>
       )}
@@ -219,7 +129,6 @@ function LessonChatbot({ lessonId, persona }: { lessonId: string; persona: strin
     setMessages(nextMessages)
     setInput('')
     setStreaming(true)
-
     let assistantText = ''
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
@@ -227,10 +136,7 @@ function LessonChatbot({ lessonId, persona }: { lessonId: string; persona: strin
       for await (const event of streamLessonChat(lessonId, persona, nextMessages)) {
         if (event.type === 'chunk' && event.text) {
           assistantText += event.text
-          setMessages((prev) => [
-            ...prev.slice(0, -1),
-            { role: 'assistant', content: assistantText },
-          ])
+          setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', content: assistantText }])
         }
       }
     } finally {
@@ -239,12 +145,11 @@ function LessonChatbot({ lessonId, persona }: { lessonId: string; persona: strin
   }
 
   return (
-    <div className="border-t-2 border-slate-200 dark:border-slate-700 pt-6 mt-6">
+    <div className="border-t-2 border-slate-200 dark:border-slate-700 pt-6 mt-2">
       <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-4 flex items-center gap-2">
         <span className="material-symbols-outlined text-primary">smart_toy</span>
         Ask your lesson assistant
       </h3>
-
       {messages.length > 0 && (
         <div className="space-y-3 mb-4 max-h-80 overflow-y-auto">
           {messages.map((m, i) => (
@@ -261,23 +166,14 @@ function LessonChatbot({ lessonId, persona }: { lessonId: string; persona: strin
           <div ref={bottomRef} />
         </div>
       )}
-
       <div className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
+        <input type="text" value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSend() }}
-          placeholder="Ask anything about this lesson…"
-          disabled={streaming}
+          placeholder="Ask anything about this lesson…" disabled={streaming}
           className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:border-primary focus:outline-none text-sm disabled:opacity-50"
         />
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={streaming || !input.trim()}
-          className="px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-light disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
+        <button type="button" onClick={handleSend} disabled={streaming || !input.trim()}
+          className="px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-light disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
           {streaming ? '…' : 'Ask'}
         </button>
       </div>
@@ -298,27 +194,17 @@ export default function LessonPage() {
   const [lesson, setLesson] = useState<LessonContent | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [currentStep, setCurrentStep] = useState(0)
 
-  const persona = currentPersona === 'demo' ? 'charles' : currentPersona  // fallback in case demo is somehow selected
+  const persona = currentPersona === 'demo' ? 'charles' : currentPersona
 
   useEffect(() => {
     if (!lessonId) return
     setLoading(true)
-    setCurrentStep(0)
     fetchLesson(lessonId, persona, courseOverride)
       .then((data) => { setLesson(data); setError(null) })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false))
   }, [lessonId, persona])
-
-  const allStepTitles = lesson
-    ? [...lesson.steps.map((s) => s.title), 'Videos', 'Practice']
-    : []
-
-  const totalSteps = allStepTitles.length
-  const isVideosStep = lesson && currentStep === lesson.steps.length
-  const isPracticeStep = lesson && currentStep === lesson.steps.length + 1
 
   return (
     <AppLayout
@@ -329,7 +215,7 @@ export default function LessonPage() {
       title={lesson?.title ?? 'Loading lesson…'}
       description={lesson?.overview ?? ''}
     >
-      <div className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-12 py-6 sm:py-8 pb-48 min-w-0">
+      <div className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-12 py-6 sm:py-8 pb-32 min-w-0">
         {error && (
           <div className="mb-6 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300">
             Failed to load lesson: {error}
@@ -342,57 +228,49 @@ export default function LessonPage() {
             <p className="text-sm">Generating your personalized lesson…</p>
           </div>
         ) : lesson && (
-          <div className="space-y-6">
+          <div className="space-y-8">
+
             {/* Overview */}
             <div className="rounded-2xl bg-primary/5 dark:bg-primary/10 border-2 border-primary/20 p-5">
               <p className="text-slate-700 dark:text-slate-300 leading-relaxed">{lesson.overview}</p>
             </div>
 
-            {/* Step indicator */}
-            <StepIndicator steps={allStepTitles} current={currentStep} onSelect={setCurrentStep} />
+            {/* Steps — all rendered as a scroll */}
+            {lesson.steps.map((step) => {
+              const borderColor = step.type === 'example'
+                ? 'border-amber-200/80 dark:border-amber-800/40'
+                : step.type === 'summary'
+                ? 'border-primary/30 dark:border-primary/20'
+                : 'border-slate-200 dark:border-slate-700'
+              const badge = step.type === 'example'
+                ? { label: 'Example', icon: 'lightbulb', color: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20' }
+                : step.type === 'summary'
+                ? { label: 'Summary', icon: 'summarize', color: 'text-primary bg-emerald-50 dark:bg-emerald-900/20' }
+                : { label: 'Concept', icon: 'school', color: 'text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800' }
+              return (
+                <div key={step.step_number} className={`rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 ${borderColor} shadow-soft`}>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold mb-3 ${badge.color}`}>
+                    <span className="material-symbols-outlined text-sm">{badge.icon}</span>
+                    {badge.label}
+                  </span>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display mb-3">{step.title}</h3>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line">{step.content}</p>
+                </div>
+              )
+            })}
 
-            {/* Step content */}
-            {!isVideosStep && !isPracticeStep && lesson.steps[currentStep] && (
-              <StepCard step={lesson.steps[currentStep]} />
-            )}
-
-            {isVideosStep && (
-              <div className="space-y-4">
+            {/* Videos */}
+            {lesson.videos.length > 0 && (
+              <div className="space-y-3">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Related Videos</h3>
-                {lesson.videos.length > 0
-                  ? lesson.videos.map((v, i) => <VideoCard key={i} video={v} />)
-                  : <p className="text-sm text-slate-400">No videos found for this lesson.</p>
-                }
+                {lesson.videos.map((v, i) => <VideoCard key={i} video={v} />)}
               </div>
             )}
 
-            {isPracticeStep && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Check Your Understanding</h3>
-                {lesson.questions.map((q, i) => <QuestionCard key={i} question={q} index={i} />)}
-              </div>
-            )}
-
-            {/* Navigation */}
-            <div className="flex justify-between pt-2">
-              <button
-                type="button"
-                disabled={currentStep === 0}
-                onClick={() => setCurrentStep((s) => s - 1)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:border-primary/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-              >
-                <span className="material-symbols-outlined text-sm">arrow_back</span>
-                Previous
-              </button>
-              <button
-                type="button"
-                disabled={currentStep === totalSteps - 1}
-                onClick={() => setCurrentStep((s) => s + 1)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-light disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-              >
-                Next
-                <span className="material-symbols-outlined text-sm">arrow_forward</span>
-              </button>
+            {/* Questions */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Check Your Understanding</h3>
+              {lesson.questions.map((q, i) => <QuestionCard key={i} question={q} index={i} />)}
             </div>
 
             {/* Chatbot */}
