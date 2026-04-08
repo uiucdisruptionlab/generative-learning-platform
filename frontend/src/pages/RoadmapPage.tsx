@@ -16,14 +16,17 @@ export default function RoadmapPage() {
   const [outcomes, setOutcomes] = useState<HomeRoadmapOutcome[] | null>(null)
   const [target, setTarget] = useState<FrontendRoadmapTarget>(ROADMAP_TARGETS.accounting)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    setLoading(true)
     fetchRoadmap({ ...target, refine: true })
       .then((data) => {
         setOutcomes(mapLessonsToOutcomes(data.lessons))
         setError(null)
       })
       .catch((err) => setError(String(err)))
+      .finally(() => setLoading(false))
   }, [target])
 
   const outcomeCount = outcomes ? `${outcomes.length} learning outcomes` : '...'
@@ -52,7 +55,14 @@ export default function RoadmapPage() {
             Failed to load roadmap: {error}
           </div>
         )}
-        <LearningRoadmap outcomes={outcomes ?? undefined} />
+        {loading ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-24 text-gray-400 dark:text-gray-500">
+            <span className="material-symbols-outlined animate-spin text-4xl text-primary">progress_activity</span>
+            <p className="text-sm">Building your personalized roadmap…</p>
+          </div>
+        ) : (
+          <LearningRoadmap outcomes={outcomes ?? undefined} />
+        )}
 
         <button
           type="button"

@@ -170,7 +170,7 @@ def refine_roadmap_with_llm(roadmap: dict[str, Any]) -> dict[str, Any]:
                         "content": [{"text": json.dumps(roadmap, ensure_ascii=False, indent=2)}],
                     }
                 ],
-                inferenceConfig={"maxTokens": 1600, "temperature": 0},
+                inferenceConfig={"maxTokens": 4096, "temperature": 0},
             )
             raw_text = _extract_text_from_converse_response(response)
             refined = _parse_llm_json(raw_text)

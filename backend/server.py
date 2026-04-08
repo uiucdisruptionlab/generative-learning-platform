@@ -315,17 +315,53 @@ def _process_llm_response(
 # Routes
 # ---------------------------------------------------------------------------
 
+ROADMAP_CACHE_PATH = Path(__file__).parent / "roadmap_cache.json"
+
+
+def _load_cache() -> dict | None:
+    if ROADMAP_CACHE_PATH.exists():
+        try:
+            return json.loads(ROADMAP_CACHE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return None
+
+
+def _save_cache(data: dict) -> None:
+    ROADMAP_CACHE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _build_and_cache(course: str, lecture_id: str | None) -> dict:
+    from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
+    if lecture_id:
+        data = build_roadmap_for_lecture(lecture_id, course=course, refine_with_llm=True)
+    else:
+        data = build_roadmap(course=course, refine_with_llm=True)
+    _save_cache(data)
+    return data
+
+
 @app.get("/roadmap")
 def get_roadmap(
     course: str = Query(default="accounting"),
     lecture_id: str | None = Query(default=None),
-    refine: bool = Query(default=False),
 ):
-    from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
+    cached = _load_cache()
+    if cached:
+        return cached
     try:
-        if lecture_id:
-            return build_roadmap_for_lecture(lecture_id, course=course, refine_with_llm=refine)
-        return build_roadmap(course=course, refine_with_llm=refine)
+        return _build_and_cache(course, lecture_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/roadmap/rebuild")
+def rebuild_roadmap(
+    course: str = Query(default="accounting"),
+    lecture_id: str | None = Query(default=None),
+):
+    try:
+        return _build_and_cache(course, lecture_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
