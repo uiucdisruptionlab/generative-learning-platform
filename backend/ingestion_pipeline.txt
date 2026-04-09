@@ -1,0 +1,13 @@
+document
+   ↓
+extract text 
+   ↓
+semantic chunking 
+   ↓
+generate embedding
+   ↓
+create CourseChunk object (data item)
+   ↓
+convert to Pinecone record
+   ↓
+upsert

@@ -3,9 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 export const ROADMAP_COURSES = [
   { path: '/roadmap', label: 'ACCY 301 · Financial Accounting' },
   { path: '/roadmap/cs101', label: 'CS 101 · Intro to Python' },
-  { path: '/roadmap/mktg440', label: 'MKTG 440 · Digital Marketing' },
-  { path: '/roadmap/hist102', label: 'HIST 102 · World History II' },
-  { path: '/roadmap/econ201', label: 'ECON 201 · Macroeconomics' },
 ] as const
 
 type RoadmapCourseSelectProps = {

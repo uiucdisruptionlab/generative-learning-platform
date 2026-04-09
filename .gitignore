@@ -1,6 +1,8 @@
 node_modules
 dist
 .env
+backend/roadmap_cache*.json
+backend/lesson_cache/
 .claude/settings.local.json
 .gitignore
 .vscode/settings.json

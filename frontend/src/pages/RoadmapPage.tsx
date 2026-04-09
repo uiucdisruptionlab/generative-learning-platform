@@ -1,11 +1,54 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
 import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
+import {
+  fetchRoadmap,
+  mapLessonsToOutcomes,
+  ROADMAP_TARGETS,
+  type FrontendRoadmapTarget,
+} from '../api/roadmap'
+import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+
+const COURSE_LABELS: Record<string, { title: string; description: string }> = {
+  accounting: { title: 'Financial Accounting', description: 'Personalized for you' },
+  python: { title: 'Intro to Python', description: 'Personalized for you' },
+  financing: { title: 'Financing Economic Development', description: 'Personalized for you' },
+}
+
+function getCourseKey(target: FrontendRoadmapTarget): string {
+  const course = target.course.toLowerCase()
+  if (course.includes('alec') || course === 'accounting') return 'accounting'
+  if (course === 'python') return 'python'
+  if (course === 'financing') return 'financing'
+  return 'accounting'
+}
 
 export default function RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [outcomes, setOutcomes] = useState<HomeRoadmapOutcome[] | null>(null)
+  const [target, setTarget] = useState<FrontendRoadmapTarget>(ROADMAP_TARGETS.accounting)
+  const [selectedPath, setSelectedPath] = useState('/roadmap')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const courseKey = getCourseKey(target)
+  const courseLabel = COURSE_LABELS[courseKey] ?? COURSE_LABELS.accounting
+
+  useEffect(() => {
+    setLoading(true)
+    setOutcomes(null)
+    fetchRoadmap({ ...target, refine: true })
+      .then((data) => {
+        setOutcomes(mapLessonsToOutcomes(data.lessons))
+        setError(null)
+      })
+      .catch((err) => setError(String(err)))
+      .finally(() => setLoading(false))
+  }, [target])
+
+  const outcomeCount = outcomes ? `${outcomes.length} learning outcomes` : '...'
 
   return (
     <AppLayout
@@ -13,12 +56,36 @@ export default function RoadmapPage() {
       onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       settingsOpen={settingsOpen}
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
-      title="Financial Accounting"
-      description="6 learning outcomes · Personalized for you"
-      action={<RoadmapCourseSelect variant="header" />}
+      title={courseLabel.title}
+      description={`${outcomeCount} · ${courseLabel.description}`}
+      action={<RoadmapCourseSelect variant="header" value={selectedPath} onValueChange={(path) => {
+        setSelectedPath(path)
+        if (path === '/roadmap/accounting' || path === '/roadmap') {
+          setTarget(ROADMAP_TARGETS.accounting)
+        } else if (path === '/roadmap/python' || path === '/roadmap/cs101') {
+          setTarget(ROADMAP_TARGETS.python)
+        } else if (path === '/roadmap/financing') {
+          setTarget(ROADMAP_TARGETS.financing)
+        }
+      }} />}
     >
       <div className="max-w-[800px] w-full min-w-0 mx-auto px-8 lg:px-12 py-8 lg:py-12">
-        <LearningRoadmap />
+        {error && (
+          <div className="mb-6 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+            Failed to load roadmap: {error}
+          </div>
+        )}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-24 text-gray-400 dark:text-gray-500">
+            <span className="material-symbols-outlined animate-spin text-4xl text-primary">progress_activity</span>
+            <p className="text-sm">Building your personalized roadmap…</p>
+          </div>
+        ) : (
+          <LearningRoadmap
+            outcomes={outcomes ?? undefined}
+            startHereTo={outcomes && outcomes.length > 0 ? `/lesson/${outcomes[0].id}?course=${courseKey}` : '#'}
+          />
+        )}
 
         <button
           type="button"
