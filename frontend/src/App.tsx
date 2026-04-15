@@ -19,6 +19,7 @@ import PythonRoadmapPage from './pages/PythonRoadmapPage'
 import FinancingRoadmapPage from './pages/FinancingRoadmapPage'
 import AccountingRoadmapPage from './pages/AccountingRoadmapPage'
 import LessonPage from './pages/LessonPage'
+import DemoPipelinePage from './pages/DemoPipelinePage'
 
 function App() {
   return (
@@ -44,6 +45,7 @@ function App() {
         <Route path="/roadmap/financing" element={<FinancingRoadmapPage />} />
         <Route path="/roadmap/accounting" element={<AccountingRoadmapPage />} />
         <Route path="/lesson/:lessonId" element={<LessonPage />} />
+        <Route path="/demo/pipeline" element={<DemoPipelinePage />} />
       </Routes>
     </PersonaProvider>
   )

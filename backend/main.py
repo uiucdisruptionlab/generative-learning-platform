@@ -2,15 +2,18 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+_backend_dir = Path(__file__).resolve().parent
+load_dotenv(_backend_dir.parent / ".env")
+load_dotenv(_backend_dir / ".env", override=True)
 
-from unstructured.pdf_text_extractor import PDFTextExtractor
-from unstructured.text_chunker import TextChunker
+from glp_unstructured.pdf_text_extractor import PDFTextExtractor
+from glp_unstructured.text_chunker import TextChunker
 from bedrock.embedder import BedrockEmbedder
 from concept_extractor import extract_concepts_from_chunk
 from graphdb.graph_ingestion import ingest as ingest_graph
 from pc_client.client import PineconeClient
 from pc_client.models.chunks import ChunkMetadata, CourseChunk
+from pipeline_log import plog
 
 
 def process_pdf(
@@ -21,7 +24,8 @@ def process_pdf(
     enable_graph_ingestion: bool = False,
     graph_only: bool = False,
     namespace: str = "DL_Transcripts",
-):
+    max_chunks: int | None = None,
+) -> dict[str, int | bool]:
     """
     Orchestrates the full pipeline: extract -> chunk -> embed -> upsert.
 
@@ -30,16 +34,39 @@ def process_pdf(
 
     When graph_only is True, skips embedding and Pinecone upsert entirely —
     useful when chunks are already in Pinecone and you only need the Neo4j graph.
+
+    max_chunks: if set, only the first N chunks are processed (after chunking).
+    Each chunk with graph ingestion triggers a Bedrock call — large PDFs can produce
+    hundreds of chunks and run for a very long time without a cap.
     """
+
+    plog(
+        "process_pdf",
+        f"START path={pdf_path} graph_ingestion={enable_graph_ingestion} graph_only={graph_only} max_chunks={max_chunks}",
+    )
 
     extractor = PDFTextExtractor(unstructured_api_key)
     chunker = TextChunker(chunk_size=500, chunk_overlap=100)
 
+    plog("process_pdf", "step 1/4: Unstructured extract_texts (API; can be slow)…")
     texts = extractor.extract_texts(pdf_path)
-    print(f"Extracted {len(texts)} text elements")
+    plog("process_pdf", f"step 1 done: {len(texts)} text elements from Unstructured")
 
+    plog("process_pdf", "step 2/4: chunk_texts…")
     chunks = chunker.chunk_texts(texts)
-    print(f"Created {len(chunks)} chunks")
+    total_chunks = len(chunks)
+    truncated = False
+    if max_chunks is not None and total_chunks > max_chunks:
+        chunks = chunks[:max_chunks]
+        truncated = True
+        print(
+            f"Created {total_chunks} chunks; using first {max_chunks} only "
+            f"(set PIPELINE_MAX_CHUNKS / max_chunks to raise the cap)"
+        )
+    else:
+        print(f"Created {total_chunks} chunks", flush=True)
+
+    plog("process_pdf", f"step 2 done: {total_chunks} chunks (processing {len(chunks)} after cap)")
 
     offering_id = os.path.splitext(os.path.basename(pdf_path))[0]
 
@@ -51,8 +78,14 @@ def process_pdf(
             namespace=namespace,
         )
 
+    n = len(chunks)
+    plog(
+        "process_pdf",
+        f"step 3/4: loop {n} chunks ({'Bedrock+Neo4j only' if graph_only else 'embed + graph ingest'})…",
+    )
+
     records = []
-    for chunk in chunks:
+    for idx, chunk in enumerate(chunks, start=1):
         chunk_text = chunk["chunk"]
         chunk_index = chunk["metadata"].get("chunk_index", 0)
         chunk_id = f"{offering_id}_p{chunk['metadata'].get('page_number', 1)}_c{chunk_index}"
@@ -63,12 +96,15 @@ def process_pdf(
             text=chunk_text,
             chunk_number=chunk_index + 1,
         )
+        if not graph_only:
+            plog("process_pdf", f"  [{idx}/{n}] chunk_id={chunk_id} embedding…")
         course_chunk = CourseChunk(id=chunk_id, values=[] if graph_only else embedder.embed_data(chunk_text), metadata=metadata)
 
         if not graph_only:
             records.append(course_chunk.to_pinecone_record())
 
         if enable_graph_ingestion:
+            plog("process_pdf", f"  [{idx}/{n}] chunk_id={chunk_id} Bedrock concept extract → Neo4j…")
             try:
                 extracted = extract_concepts_from_chunk(
                     {
@@ -78,15 +114,27 @@ def process_pdf(
                     }
                 )
                 ingest_graph(course_chunk, extracted)
+                plog("process_pdf", f"  [{idx}/{n}] chunk_id={chunk_id} graph ingest OK")
             except Exception as exc:
-                print(f"[graph] Skipping chunk {chunk_id}: {exc}")
+                print(f"[graph] Skipping chunk {chunk_id}: {exc}", flush=True)
+
+    plog("process_pdf", "step 4/4: Pinecone upsert (if enabled)…")
 
     if not graph_only:
         if records:
             pinecone_client.upsert(records)
-            print(f"Upserted {len(records)} records to Pinecone")
+            print(f"Upserted {len(records)} records to Pinecone", flush=True)
         else:
-            print("No records to upsert")
+            print("No records to upsert", flush=True)
+
+    plog("process_pdf", f"FINISH offering_id={offering_id}")
+
+    return {
+        "text_element_count": len(texts),
+        "total_chunks": total_chunks,
+        "chunks_processed": len(chunks),
+        "truncated": truncated,
+    }
 
 
 def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key):

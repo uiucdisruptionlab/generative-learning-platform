@@ -569,13 +569,20 @@ def build_roadmap_from_graph_data(
     course: str = "generated_course",
     refine_with_llm: bool = False,
 ) -> dict[str, Any]:
+    from pipeline_log import plog
+
     graph_data = _filter_graph_data_for_course(graph_data, course)
+    plog("roadmap", "_build_rough_roadmap (CPU graph sort)…")
     roadmap = _build_rough_roadmap(graph_data, course=course)
+    plog("roadmap", f"rough roadmap lessons={roadmap.get('lesson_count')}")
 
     if refine_with_llm:
         from graphdb.roadmap_refiner import refine_roadmap_with_llm
 
-        return refine_roadmap_with_llm(roadmap)
+        plog("roadmap", "refine_roadmap_with_llm (Bedrock; can be slow)…")
+        refined = refine_roadmap_with_llm(roadmap)
+        plog("roadmap", "refine_roadmap_with_llm DONE")
+        return refined
 
     return roadmap
 
@@ -600,13 +607,20 @@ def build_roadmap_for_lecture(
     refine_with_llm: bool | None = None,
 ) -> dict[str, Any]:
     from graphdb.neo4j_client import get_concept_graph_by_lecture
+    from pipeline_log import plog
 
     if refine_with_llm is None:
         refine_with_llm = os.getenv("ENABLE_ROADMAP_REFINEMENT", "false").lower() == "true"
 
+    plog("roadmap", f"build_roadmap_for_lecture START lecture_id={lecture_id} refine_with_llm={refine_with_llm}")
     graph_data = get_concept_graph_by_lecture(lecture_id)
+    plog(
+        "roadmap",
+        f"Cypher loaded concepts={len(graph_data.get('concepts', []))} chunk_links={len(graph_data.get('chunk_links', []))}",
+    )
     roadmap = build_roadmap_from_graph_data(graph_data, course=course, refine_with_llm=refine_with_llm)
     roadmap["lecture_id"] = lecture_id
+    plog("roadmap", f"build_roadmap_for_lecture DONE lessons={roadmap.get('lesson_count')}")
     return roadmap
 
 

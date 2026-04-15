@@ -1,6 +1,8 @@
 from typing import List, Dict, Any
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from pipeline_log import plog
+
 
 class TextChunker:
     """
@@ -21,6 +23,7 @@ class TextChunker:
         Input: List of {'text': str, 'metadata': dict}
         Output: List of {'chunk': str, 'metadata': dict} (with updated metadata for chunk index)
         """
+        plog("chunker", f"chunk_texts START: {len(texts)} text elements → splitting…")
         chunks = []
         for i, item in enumerate(texts):
             text = item['text']
@@ -36,6 +39,6 @@ class TextChunker:
                     'chunk': chunk,
                     'metadata': chunk_metadata
                 })
-                print(f"Text Chunked: {chunk}\n")
-        
+
+        plog("chunker", f"chunk_texts DONE: {len(chunks)} chunks")
         return chunks

@@ -1,11 +1,11 @@
 import os
 from typing import List, Dict, Any
-from pinecone import Pinecone, PineconeApiException
+
 import unstructured_client
+
+from pipeline_log import plog
 from unstructured_client.models import operations, shared
 
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index = os.getenv("PINECONE_INDEX", "library")
 
 class PDFTextExtractor:
     """
@@ -21,8 +21,10 @@ class PDFTextExtractor:
         Parse PDF and extract text elements.
         Returns list of dicts: {'text': str, 'metadata': dict}
         """
+        plog("unstructured", f"reading file bytes path={os.path.basename(pdf_path)}…")
         with open(pdf_path, "rb") as f:
             files_content = f.read()
+        plog("unstructured", f"read {len(files_content)} bytes; calling Unstructured partition (VLM; may take minutes)…")
 
         req = operations.PartitionRequest(
             partition_parameters=shared.PartitionParameters(
@@ -41,6 +43,7 @@ class PDFTextExtractor:
         )
 
         res = self.unstructured_client.general.partition(request=req)
+        plog("unstructured", "partition API returned; building text element list…")
         texts = []
         for element in res.elements:
             element_dict = element  
@@ -50,5 +53,5 @@ class PDFTextExtractor:
                     'text': text,
                     'metadata': element_dict.get('metadata', {})
                 })
-            # print(f"Text Extracted: {text} \n")
+        plog("unstructured", f"extract_texts DONE: {len(texts)} non-empty elements")
         return texts

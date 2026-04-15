@@ -6,6 +6,9 @@ backend/lesson_cache/
 .claude/settings.local.json
 .gitignore
 .vscode/settings.json
-backend/__pycache__/main.cpython-310.pyc
-backend/__pycache__/main.cpython-310.pyc
-backend/__pycache__/main.cpython-310.pyc
+
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.cpython-*.pyc

@@ -3,7 +3,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+_backend_dir = Path(__file__).resolve().parent.parent
+load_dotenv(_backend_dir.parent / ".env")
+load_dotenv(_backend_dir / ".env", override=True)
 
 _URI      = os.getenv("NEO4J_URI")
 _USERNAME = os.getenv("NEO4J_USERNAME")
@@ -18,12 +20,26 @@ def _driver():
 
 
 def get_all_concepts() -> list[str]:
+    """Full scan — avoid in hot paths; use get_concepts_by_names for batch ingest."""
     with _driver() as driver:
         records, _, _ = driver.execute_query(
             "MATCH (c:Concept) RETURN c.name AS name",
             database_=_DATABASE,
         )
     return [r["name"] for r in records]
+
+
+def get_concepts_by_names(names: list[str]) -> set[str]:
+    """Return which of the given names already exist as Concept nodes (indexed lookup, not full scan)."""
+    if not names:
+        return set()
+    with _driver() as driver:
+        records, _, _ = driver.execute_query(
+            "MATCH (c:Concept) WHERE c.name IN $names RETURN c.name AS name",
+            names=names,
+            database_=_DATABASE,
+        )
+    return {r["name"] for r in records}
 
 def get_lessons_by_course(course_id: str) -> list[dict]:
     with _driver() as driver:
@@ -113,6 +129,9 @@ def get_concepts_by_lecture(lecture_id: str) -> list[dict[str, str]]:
 
 
 def get_concept_graph_by_lecture(lecture_id: str) -> dict:
+    from pipeline_log import plog
+
+    plog("neo4j_query", f"get_concept_graph_by_lecture START lecture_id={lecture_id}")
     with _driver() as driver:
         concept_records, _, _ = driver.execute_query(
             """
@@ -142,11 +161,18 @@ def get_concept_graph_by_lecture(lecture_id: str) -> dict:
             database_=_DATABASE,
         )
 
+    concepts = [record.data() for record in concept_records]
+    rels = [record.data() for record in relationship_records]
+    links = [record.data() for record in chunk_records]
+    plog(
+        "neo4j_query",
+        f"get_concept_graph_by_lecture DONE concepts={len(concepts)} rels={len(rels)} chunk_links={len(links)}",
+    )
     return {
         "lecture_id": lecture_id,
-        "concepts": [record.data() for record in concept_records],
-        "relationships": [record.data() for record in relationship_records],
-        "chunk_links": [record.data() for record in chunk_records],
+        "concepts": concepts,
+        "relationships": rels,
+        "chunk_links": links,
     }
 
 

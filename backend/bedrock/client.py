@@ -8,12 +8,14 @@ from urllib.parse import quote
 
 import boto3
 import requests
+from botocore.config import Config
 
 
 class BearerTokenBedrockClient:
-    def __init__(self, *, region: str, api_key: str):
+    def __init__(self, *, region: str, api_key: str, connect_timeout: float = 10.0, read_timeout: float = 180.0):
         self.region = region
         self.api_key = api_key
+        self._timeout = (connect_timeout, read_timeout)
         self.base_url = f"https://bedrock-runtime.{region}.amazonaws.com"
         self.session = requests.Session()
         self.session.headers.update(
@@ -30,11 +32,11 @@ class BearerTokenBedrockClient:
 
     def _post_json(self, url: str, payload: Any) -> requests.Response:
         if isinstance(payload, (bytes, bytearray)):
-            response = self.session.post(url, data=payload)
+            response = self.session.post(url, data=payload, timeout=self._timeout)
         elif isinstance(payload, str):
-            response = self.session.post(url, data=payload.encode("utf-8"))
+            response = self.session.post(url, data=payload.encode("utf-8"), timeout=self._timeout)
         else:
-            response = self.session.post(url, json=payload)
+            response = self.session.post(url, json=payload, timeout=self._timeout)
         response.raise_for_status()
         return response
 
@@ -97,13 +99,25 @@ def _has_bedrock_api_key() -> bool:
 
 def create_bedrock_runtime_client(region: str | None = None):
     region = region or os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+    read_timeout = float(os.getenv("BEDROCK_READ_TIMEOUT", "180"))
+    connect_timeout = float(os.getenv("BEDROCK_CONNECT_TIMEOUT", "10"))
+    boto_cfg = Config(
+        read_timeout=read_timeout,
+        connect_timeout=connect_timeout,
+        retries={"max_attempts": 3, "mode": "standard"},
+    )
 
     if _has_standard_aws_credentials():
-        return boto3.client("bedrock-runtime", region_name=region)
+        return boto3.client("bedrock-runtime", region_name=region, config=boto_cfg)
 
     api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
     if api_key:
-        return BearerTokenBedrockClient(region=region, api_key=api_key)
+        return BearerTokenBedrockClient(
+            region=region,
+            api_key=api_key,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
 
     raise RuntimeError(
         "Bedrock authentication is not configured. Set AWS_BEARER_TOKEN_BEDROCK "

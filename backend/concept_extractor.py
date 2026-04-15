@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from bedrock.client import create_bedrock_runtime_client
+from pipeline_log import plog
 
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 BEDROCK_MODEL_ID = os.getenv(
@@ -246,6 +247,7 @@ def extract_concepts_from_chunk(chunk: Any) -> dict[str, Any]:
         "metadata": metadata,
     }
 
+    plog("bedrock", f"converse START chunk_id={chunk_id} model={BEDROCK_MODEL_ID} text_len={len(chunk_text)}")
     client = create_bedrock_runtime_client(region=AWS_REGION)
     response = client.converse(
         modelId=BEDROCK_MODEL_ID,
@@ -267,8 +269,14 @@ def extract_concepts_from_chunk(chunk: Any) -> dict[str, Any]:
     )
 
     raw_text = _extract_text_from_converse_response(response)
+    plog("bedrock", f"converse response received chunk_id={chunk_id} raw_len={len(raw_text)}")
     parsed = _parse_llm_json(raw_text)
-    return _normalize_result(parsed, fallback_chunk_id=chunk_id)
+    out = _normalize_result(parsed, fallback_chunk_id=chunk_id)
+    plog(
+        "bedrock",
+        f"converse DONE chunk_id={chunk_id} concepts={len(out.get('concepts', []))} rels={len(out.get('relationships', []))}",
+    )
+    return out
 
 
 def extract_concepts_from_chunks(chunks: list[Any]) -> list[dict[str, Any]]:

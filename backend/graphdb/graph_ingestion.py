@@ -4,9 +4,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pc_client.models.chunks import CourseChunk
+from pipeline_log import plog
+
 from graphdb.neo4j_client import (
     create_course,
-    get_all_concepts,
+    get_concepts_by_names,
     create_lecture,
     create_chunk,
     create_concept,
@@ -42,16 +44,29 @@ def ingest(chunk: CourseChunk, extracted: dict) -> None:
                   "concepts"      : list of {"name": str, "description": str}
                   "relationships" : list of {"from": str, "to": str, "type": str}
     """
+    plog(
+        "neo4j_ingest",
+        f"ingest START chunk={chunk.id} concepts_in={len(extracted.get('concepts', []))} rels_in={len(extracted.get('relationships', []))}",
+    )
     print(f"\n{'='*60}")
     print(f"[graph_ingestion] Processing chunk: {chunk.id}")
     print(f"{'='*60}")
 
-  
-    # 1. Fetch existing concepts so we can detect reuse vs. new creation  
-    existing = set(get_all_concepts())
-    print(f"[neo4j] Found {len(existing)} existing concept(s) in graph")
-    if existing:
+    # 1. Only look up concepts this chunk touches (full-graph scan was O(all concepts) per chunk)
+    names_for_lookup: set[str] = {c["name"] for c in extracted.get("concepts", []) if c.get("name")}
+    for rel in extracted.get("relationships", []):
+        if rel.get("from"):
+            names_for_lookup.add(rel["from"])
+        if rel.get("to"):
+            names_for_lookup.add(rel["to"])
+    plog("neo4j_ingest", f"lookup existing concepts for {len(names_for_lookup)} name(s)…")
+    existing = get_concepts_by_names(list(names_for_lookup))
+    print(f"[neo4j] Of this chunk's names, {len(existing)} already exist in graph (targeted query)")
+    if existing and len(existing) <= 30:
         print(f"         {sorted(existing)}")
+    elif existing:
+        sample = sorted(existing)[:15]
+        print(f"         (showing 15/{len(existing)}): {sample} …")
 
     # 2. Ensure the Chunk node exists                                      
     create_chunk(
@@ -124,3 +139,4 @@ def ingest(chunk: CourseChunk, extracted: dict) -> None:
         print(f"           ({r[0]})-[:{r[1]}]->({r[2]})")
     print(f"[summary] CONTAINS edges  : {len(all_concept_names)}")
     print(f"{'='*60}\n")
+    plog("neo4j_ingest", f"ingest DONE chunk={chunk.id}")

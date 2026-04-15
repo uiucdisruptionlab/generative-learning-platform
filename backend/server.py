@@ -4,19 +4,24 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from bedrock.client import create_bedrock_runtime_client
+from pipeline_log import plog
 
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+_backend_dir = Path(__file__).resolve().parent
+load_dotenv(_backend_dir.parent / ".env")
+load_dotenv(_backend_dir / ".env", override=True)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 MODEL_ID = os.getenv("BEDROCK_MODEL_ID",
@@ -440,6 +445,126 @@ def rebuild_lesson(lesson_id: str, persona: str = Query(default="charles"), cour
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+def _pipeline_max_chunks() -> int | None:
+    """
+    Cap how many chunks get Bedrock + Neo4j graph ingestion per PDF.
+    Each chunk is one Bedrock call; large PDFs can produce hundreds of chunks (30+ min).
+    Set PIPELINE_MAX_CHUNKS empty, 'none', or 'unlimited' for no cap (not recommended for demos).
+    """
+    raw = os.getenv("PIPELINE_MAX_CHUNKS", "40").strip()
+    if not raw or raw.lower() in ("none", "unlimited"):
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return 40
+    if n < 1:
+        return None
+    return n
+
+
+def _sanitize_pdf_stem(filename: str) -> str:
+    """Safe basename stem for temp files and Neo4j lecture id (matches main.process_pdf offering_id)."""
+    name = Path(filename or "document").name
+    stem = Path(name).stem
+    stem = re.sub(r"[^a-zA-Z0-9._-]+", "_", stem).strip("._-")
+    return stem[:120] if stem else "document"
+
+
+def _run_pdf_ingest_job(pdf_path: Path, refine_with_llm: bool) -> Dict[str, Any]:
+    """
+    Run extract → chunk → Bedrock concept extraction → Neo4j (graph_only: no Pinecone upsert).
+    Lecture id in the graph equals the PDF filename stem.
+    """
+    from main import process_pdf
+    from graphdb.neo4j_client import get_concept_graph_by_lecture
+    from graphdb.roadmap_builder import build_roadmap_for_lecture
+
+    plog("ingest_job", f"START pdf={pdf_path.name} refine_with_llm={refine_with_llm}")
+
+    unstructured_key = os.getenv("UNSTRUCTURED_API_KEY")
+    if not unstructured_key:
+        raise RuntimeError("UNSTRUCTURED_API_KEY is not set")
+
+    plog("ingest_job", "calling main.process_pdf (Unstructured → chunks → Bedrock × N → Neo4j)…")
+    ingest_stats = process_pdf(
+        str(pdf_path),
+        pinecone_index=os.getenv("PINECONE_INDEX", ""),
+        pinecone_api_key=os.getenv("PINECONE_API_KEY", ""),
+        unstructured_api_key=unstructured_key,
+        enable_graph_ingestion=True,
+        graph_only=True,
+        max_chunks=_pipeline_max_chunks(),
+    )
+    plog("ingest_job", f"process_pdf finished stats={ingest_stats}")
+
+    lecture_id = pdf_path.stem
+    plog("ingest_job", f"loading Neo4j subgraph lecture_id={lecture_id}…")
+    graph = get_concept_graph_by_lecture(lecture_id)
+    plog("ingest_job", f"Neo4j subgraph loaded concepts={len(graph.get('concepts', []))} rels={len(graph.get('relationships', []))}")
+
+    plog("ingest_job", "building roadmap from graph…")
+    roadmap = build_roadmap_for_lecture(
+        lecture_id,
+        course="generated_course",
+        refine_with_llm=refine_with_llm,
+    )
+    plog("ingest_job", f"roadmap built lesson_count={roadmap.get('lesson_count')} DONE")
+
+    chunk_ids = {str(link.get("chunk_id")) for link in graph.get("chunk_links", []) if link.get("chunk_id")}
+    return {
+        "lecture_id": lecture_id,
+        "source_filename": pdf_path.name,
+        "chunk_count": len(chunk_ids),
+        "concept_count": len(graph.get("concepts", [])),
+        "relationship_count": len(graph.get("relationships", [])),
+        "ingest_stats": ingest_stats,
+        "graph": graph,
+        "roadmap": roadmap,
+    }
+
+
+@app.post("/pipeline/ingest")
+async def pipeline_ingest(
+    file: UploadFile = File(...),
+    refine: bool = Query(default=False),
+) -> Dict[str, Any]:
+    """
+    Upload a PDF, run the same pipeline as backend/main.py (graph ingestion into Neo4j),
+    then return the subgraph for that lecture plus the roadmap from graphdb/roadmap_builder.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF uploads are supported.")
+
+    stem = _sanitize_pdf_stem(file.filename)
+    work_dir = Path(tempfile.mkdtemp(prefix="glp_ingest_"))
+    pdf_path = work_dir / f"{stem}.pdf"
+
+    try:
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="Empty file.")
+        pdf_path.write_bytes(data)
+    except HTTPException:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
+    except Exception as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=f"Could not read upload: {exc}") from exc
+
+    try:
+        plog("http", f"POST /pipeline/ingest saved temp PDF bytes={pdf_path.stat().st_size} path={pdf_path}")
+        result = await asyncio.to_thread(_run_pdf_ingest_job, pdf_path, refine)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+    return result
 
 
 @app.post("/chat/stream")
