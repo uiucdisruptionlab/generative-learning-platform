@@ -23,6 +23,11 @@ export type LessonQuestion = {
   explanation: string
 }
 
+export type LessonConcept = {
+  name: string
+  description?: string
+}
+
 export type LessonContent = {
   lesson_id: string
   title: string
@@ -30,6 +35,7 @@ export type LessonContent = {
   steps: LessonStep[]
   videos: LessonVideo[]
   questions: LessonQuestion[]
+  concepts?: LessonConcept[]
 }
 
 export async function fetchLesson(lessonId: string, persona: string, course?: string): Promise<LessonContent> {
@@ -38,6 +44,53 @@ export async function fetchLesson(lessonId: string, persona: string, course?: st
   const res = await fetch(`${API_URL}/lesson/${lessonId}?${params.toString()}`)
   if (!res.ok) {
     throw new Error(`Failed to fetch lesson: ${res.status}`)
+  }
+  return res.json()
+}
+
+export type LessonScoreRequest = {
+  lesson_id: string
+  response: string
+  persona?: string
+  student_id?: string
+  course?: string
+  question?: string
+  reference_answer?: string
+  rubric?: string
+  metadata?: Record<string, unknown>
+}
+
+export type LessonScoreResponse = {
+  student_id: string
+  lesson_id: string
+  course: string
+  score: number
+  passed: boolean
+  explanation: string
+  strengths: string[]
+  gaps: string[]
+  srs_record: Record<string, unknown>
+  roadmap_progress: Record<string, unknown> | null
+}
+
+export async function scoreLessonResponse(payload: LessonScoreRequest): Promise<LessonScoreResponse> {
+  const res = await fetch(`${API_URL}/lesson/score`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to score lesson response: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function fetchDueReviews(persona: string, studentId?: string): Promise<{ student_id: string; due: Record<string, unknown>[]; review_mode: boolean }> {
+  const params = new URLSearchParams({ persona })
+  if (studentId) params.set('student_id', studentId)
+  const res = await fetch(`${API_URL}/srs/due?${params.toString()}`)
+  if (!res.ok) {
+    throw new Error(`Failed to fetch due reviews: ${res.status}`)
   }
   return res.json()
 }

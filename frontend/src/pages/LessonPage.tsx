@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import { usePersona } from '../contexts/PersonaContext'
-import { fetchLesson, streamLessonChat, type LessonContent, type LessonQuestion, type ChatMessage } from '../api/lesson'
+import { fetchLesson, scoreLessonResponse, streamLessonChat, type LessonContent, type LessonQuestion, type ChatMessage, type LessonScoreResponse } from '../api/lesson'
 
 // ---------- Video card ----------
 
@@ -26,24 +26,52 @@ function VideoCard({ video }: { video: LessonContent['videos'][0] }) {
 
 // ---------- Question card ----------
 
-function QuestionCard({ question, index }: { question: LessonQuestion; index: number }) {
+type QuestionAnswer = {
+  question: string
+  learnerAnswer: string
+  correctAnswer: string
+  isCorrect: boolean
+}
+
+function QuestionCard({
+  question,
+  index,
+  onAnswered,
+}: {
+  question: LessonQuestion
+  index: number
+  onAnswered: (index: number, answer: QuestionAnswer | null) => void
+}) {
   const [selected, setSelected] = useState<string | null>(null)
   const [fillValue, setFillValue] = useState('')
   const [submitted, setSubmitted] = useState(false)
 
-  const isCorrect = submitted && (
+  const currentAnswer = question.type === 'multiple_choice' ? selected ?? '' : fillValue.trim()
+  const answerIsCorrect = (
     question.type === 'multiple_choice'
       ? selected === question.answer
       : fillValue.trim().toLowerCase() === question.answer.trim().toLowerCase()
   )
+  const isCorrect = submitted && answerIsCorrect
 
   const handleSubmit = () => {
     if (question.type === 'multiple_choice' && !selected) return
     if (question.type === 'fill_in_the_blank' && !fillValue.trim()) return
     setSubmitted(true)
+    onAnswered(index, {
+      question: question.question,
+      learnerAnswer: currentAnswer,
+      correctAnswer: question.answer,
+      isCorrect: answerIsCorrect,
+    })
   }
 
-  const handleRetry = () => { setSelected(null); setFillValue(''); setSubmitted(false) }
+  const handleRetry = () => {
+    setSelected(null)
+    setFillValue('')
+    setSubmitted(false)
+    onAnswered(index, null)
+  }
 
   return (
     <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 p-6 border-2 border-slate-200 dark:border-slate-700 shadow-soft">
@@ -194,17 +222,75 @@ export default function LessonPage() {
   const [lesson, setLesson] = useState<LessonContent | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [answers, setAnswers] = useState<Record<number, QuestionAnswer>>({})
+  const [scoring, setScoring] = useState(false)
+  const [scoreResult, setScoreResult] = useState<LessonScoreResponse | null>(null)
+  const [scoreError, setScoreError] = useState<string | null>(null)
 
   const persona = currentPersona === 'demo' ? 'charles' : currentPersona
 
   useEffect(() => {
     if (!lessonId) return
     setLoading(true)
+    setAnswers({})
+    setScoreResult(null)
+    setScoreError(null)
     fetchLesson(lessonId, persona, courseOverride)
       .then((data) => { setLesson(data); setError(null) })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false))
-  }, [lessonId, persona])
+  }, [lessonId, persona, courseOverride])
+
+  const answeredCount = Object.keys(answers).length
+  const allQuestionsAnswered = Boolean(lesson?.questions.length) && answeredCount === lesson?.questions.length
+
+  const handleAnswered = (index: number, answer: QuestionAnswer | null) => {
+    setScoreResult(null)
+    setScoreError(null)
+    setAnswers((prev) => {
+      const next = { ...prev }
+      if (answer) next[index] = answer
+      else delete next[index]
+      return next
+    })
+  }
+
+  const handleRecordProgress = async () => {
+    if (!lesson || !lessonId || !allQuestionsAnswered || scoring) return
+
+    const orderedAnswers = lesson.questions.map((_, index) => answers[index]).filter(Boolean)
+    const response = orderedAnswers.map((answer, index) => (
+      `Question ${index + 1}: ${answer.question}\nLearner answer: ${answer.learnerAnswer}\nCorrect answer: ${answer.correctAnswer}\nResult: ${answer.isCorrect ? 'correct' : 'incorrect'}`
+    )).join('\n\n')
+
+    const referenceAnswer = lesson.questions.map((question, index) => (
+      `Question ${index + 1}: ${question.answer}. ${question.explanation}`
+    )).join('\n')
+
+    setScoring(true)
+    setScoreError(null)
+    try {
+      const result = await scoreLessonResponse({
+        lesson_id: lessonId,
+        persona,
+        course: courseOverride,
+        response,
+        question: 'Score the learner across all generated lesson knowledge checks.',
+        reference_answer: referenceAnswer,
+        metadata: {
+          lesson_title: lesson.title,
+          question_count: lesson.questions.length,
+          correct_count: orderedAnswers.filter((answer) => answer.isCorrect).length,
+          concepts: lesson.concepts ?? [],
+        },
+      })
+      setScoreResult(result)
+    } catch (err) {
+      setScoreError(String(err))
+    } finally {
+      setScoring(false)
+    }
+  }
 
   return (
     <AppLayout
@@ -270,7 +356,38 @@ export default function LessonPage() {
             {/* Questions */}
             <div className="space-y-4">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Check Your Understanding</h3>
-              {lesson.questions.map((q, i) => <QuestionCard key={i} question={q} index={i} />)}
+              {lesson.questions.map((q, i) => (
+                <QuestionCard key={i} question={q} index={i} onAnswered={handleAnswered} />
+              ))}
+              <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 border-2 border-slate-200 dark:border-slate-700 p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white">Lesson progress</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      {answeredCount} of {lesson.questions.length} checks completed
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRecordProgress}
+                    disabled={!allQuestionsAnswered || scoring || Boolean(scoreResult)}
+                    className="px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary-light disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {scoring ? 'Recording…' : scoreResult ? 'Recorded' : 'Record progress'}
+                  </button>
+                </div>
+                {scoreResult && (
+                  <div className="mt-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-4 py-3 text-sm text-primary">
+                    <p className="font-semibold">Score: {scoreResult.score}/5 · {scoreResult.passed ? 'Passed' : 'Needs review'}</p>
+                    {scoreResult.explanation && <p className="mt-1 text-xs opacity-80">{scoreResult.explanation}</p>}
+                  </div>
+                )}
+                {scoreError && (
+                  <div className="mt-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                    Failed to record progress: {scoreError}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Chatbot */}

@@ -31,6 +31,9 @@ if _spec is None or _spec.loader is None:
 _glp_sc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_glp_sc)
 get_student_profile = _glp_sc.get_student_profile
+get_supabase_client = _glp_sc.get_supabase_client
+
+from srs import PASSING_SCORE, upsert_srs_record
 
 # Default matches backend/server.py (Haiku). Override with BEDROCK_MODEL_ID.
 DEFAULT_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
@@ -164,12 +167,12 @@ def _invoke_model_body(body: dict[str, Any]) -> dict[str, Any]:
     return json.loads(raw)
 
 
-def call_bedrock(system: str, user: str) -> dict[str, Any]:
-    """Invoke Bedrock (non-streaming), return normalized content block dict."""
+def _call_bedrock_json(system: str, user: str, *, temperature: float = 0.3) -> dict[str, Any]:
+    """Invoke Bedrock (non-streaming), return one parsed JSON object."""
     body = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 4096,
-        "temperature": 0.3,
+        "temperature": temperature,
         "system": system,
         "messages": [
             {
@@ -194,7 +197,12 @@ def call_bedrock(system: str, user: str) -> dict[str, Any]:
         print("--- Raw model output (not a JSON object) ---")
         print(raw_text)
         raise RuntimeError("Bedrock JSON root must be an object.")
-    return _normalize_block(parsed)
+    return parsed
+
+
+def call_bedrock(system: str, user: str) -> dict[str, Any]:
+    """Invoke Bedrock (non-streaming), return normalized content block dict."""
+    return _normalize_block(_call_bedrock_json(system, user))
 
 
 def _normalize_block(raw: dict[str, Any]) -> dict[str, Any]:
@@ -213,6 +221,71 @@ def _normalize_block(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+SCORING_SYSTEM_PROMPT = """You score free-response knowledge checks for a spaced repetition system.
+Return exactly one JSON object and nothing else.
+Schema:
+{
+  "score": 0,
+  "explanation": "string"
+}
+
+Scoring rubric:
+0 = blank, irrelevant, or no evidence of understanding.
+1 = tiny fragment of relevant recall but mostly incorrect.
+2 = partially relevant but misses the core idea or has major errors.
+3 = basically understands the core idea with some gaps.
+4 = correct and clear with minor omissions.
+5 = complete, precise, and well explained.
+
+Only score 3 or higher when the learner demonstrates the central concept."""
+
+
+def score_knowledge_check(
+    concept: dict[str, Any],
+    block: dict[str, Any],
+    learner_answer: str,
+) -> dict[str, Any]:
+    payload = {
+        "concept": {
+            "id": concept_id_for_srs(concept),
+            "name": concept.get("concept"),
+            "difficulty": concept.get("difficulty"),
+            "prerequisites": concept.get("prerequisites") or [],
+        },
+        "teaching_block": {
+            "explanation": block.get("explanation"),
+            "example": block.get("example"),
+        },
+        "knowledge_check": block.get("knowledge_check") or {},
+        "learner_answer": learner_answer,
+    }
+    parsed = _call_bedrock_json(
+        SCORING_SYSTEM_PROMPT,
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        temperature=0,
+    )
+    try:
+        score = max(0, min(5, int(round(float(parsed.get("score", 0))))))
+    except (TypeError, ValueError):
+        score = 0
+    return {
+        "score": score,
+        "explanation": str(parsed.get("explanation") or "").strip(),
+    }
+
+
+def concept_id_for_srs(concept: dict[str, Any]) -> str:
+    raw_id = (
+        concept.get("concept_id")
+        or concept.get("id")
+        or concept.get("node_id")
+        or concept.get("concept")
+    )
+    if not raw_id:
+        raise ValueError(f"Concept is missing an id/name for SRS: {concept}")
+    return str(raw_id)
+
+
 def run_lesson_loop(student_id: str, ordered_concepts: list[dict[str, Any]]) -> None:
     """
     Load profile once, then for each concept: Bedrock block → print → input() pause.
@@ -225,6 +298,7 @@ def run_lesson_loop(student_id: str, ordered_concepts: list[dict[str, Any]]) -> 
             "Seed students in Supabase (e.g. Alice) before running the lesson loop."
         )
 
+    supabase = get_supabase_client()
     concepts = sorted(
         ordered_concepts,
         key=lambda c: (c.get("order") is None, c.get("order") or 0),
@@ -245,7 +319,30 @@ def run_lesson_loop(student_id: str, ordered_concepts: list[dict[str, Any]]) -> 
         print(block["knowledge_check"]["question"])
         print(f"(type: {block['knowledge_check']['type']})\n")
 
-        input("Press Enter after you've answered (not graded in v1)… ")
+        learner_answer = input("Your answer: ").strip()
+        if not learner_answer:
+            learner_answer = "(blank)"
+
+        scoring = score_knowledge_check(concept, block, learner_answer)
+        srs_record = upsert_srs_record(
+            student_id=student_id,
+            concept_id=concept_id_for_srs(concept),
+            course=None,
+            score=scoring["score"],
+            metadata={
+                "knowledge_check": block.get("knowledge_check"),
+                "learner_answer": learner_answer,
+                "scoring_explanation": scoring["explanation"],
+            },
+            client=supabase,
+        )
+
+        outcome = "passed" if scoring["score"] >= PASSING_SCORE else "needs review"
+        print(
+            f"\nScore: {scoring['score']}/5 ({outcome})\n"
+            f"Why: {scoring['explanation'] or 'No explanation returned.'}\n"
+            f"Next review: {srs_record.get('next_review_at')}\n"
+        )
 
     print(f"\nDone — completed {len(concepts)} concept(s) for student {student_id!r}.")
 

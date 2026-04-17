@@ -2,6 +2,7 @@ from __future__ import annotations
 
 PERSONAS: dict[str, dict] = {
     "alice": {
+        "student_id": "a0000001-0000-4000-8000-000000000001",
         "name": "Alice",
         "major": "Finance and Data Science",
         "course": "python",
@@ -15,9 +16,10 @@ PERSONAS: dict[str, dict] = {
         ),
     },
     "bob": {
+        "student_id": "b0000002-0000-4000-8000-000000000002",
         "name": "Bob",
         "major": "Business",
-        "course": "accounting",
+        "course": "financing",
         "familiarity": "high",
         "learning_style": "reading and interacting with AI, lots of real-world examples",
         "hours_per_week": 2,
@@ -28,6 +30,7 @@ PERSONAS: dict[str, dict] = {
         ),
     },
     "charles": {
+        "student_id": "c0000003-0000-4000-8000-000000000003",
         "name": "Charles",
         "major": "Accounting",
         "course": "accounting",

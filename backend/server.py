@@ -410,6 +410,22 @@ def _save_lesson_cache(persona_id: str, lesson_id: str, data: dict, course: str 
 def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | None = None) -> dict:
     from lesson_generator import generate_lesson
     data = generate_lesson(lesson_id=lesson_id, persona_id=persona_id, course_override=course)
+    source_course = course
+    if not source_course:
+        try:
+            from personas import get_persona
+            source_course = get_persona(persona_id).get("course")
+        except Exception:
+            source_course = None
+    if source_course:
+        roadmap = _load_roadmap_cache(source_course) or {}
+        for lesson in roadmap.get("lessons", []):
+            if lesson.get("lesson_id") == lesson_id:
+                data.setdefault("concepts", lesson.get("concepts", []))
+                data.setdefault("chunk_ids", lesson.get("chunk_ids", []))
+                data.setdefault("lecture_ids", lesson.get("lecture_ids", []))
+                data.setdefault("prerequisites", lesson.get("prerequisites", []))
+                break
     _save_lesson_cache(persona_id, lesson_id, data, course)
     return data
 
@@ -493,6 +509,186 @@ class LessonChatRequest(BaseModel):
     lesson_id: str
     persona: str
     messages: List[LessonChatMessage]
+
+
+class LessonScoreRequest(BaseModel):
+    lesson_id: str
+    response: str
+    persona: str = "charles"
+    student_id: str | None = None
+    course: str | None = None
+    question: str | None = None
+    reference_answer: str | None = None
+    rubric: str | None = None
+    metadata: Dict[str, Any] | None = None
+
+
+def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None) -> dict[str, Any]:
+    cached = _load_lesson_cache(persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
+    if cached:
+        return cached
+
+    if course:
+        roadmap = _load_roadmap_cache(course) or {}
+        for lesson in roadmap.get("lessons", []):
+            if lesson.get("lesson_id") == lesson_id:
+                return lesson
+
+    return {"lesson_id": lesson_id}
+
+
+def _score_lesson_response(req: LessonScoreRequest, lesson_context: dict[str, Any]) -> dict[str, Any]:
+    system_prompt = """You score learner knowledge-check responses for a spaced repetition system.
+Return valid JSON only. No markdown. No prose outside JSON.
+
+Use this schema:
+{
+  "score": 0,
+  "explanation": "string",
+  "strengths": ["string"],
+  "gaps": ["string"]
+}
+
+Scoring rubric:
+0 = blank, irrelevant, or no evidence of understanding.
+1 = tiny fragment of relevant recall but mostly incorrect.
+2 = partially relevant but misses the core idea or has major errors.
+3 = basically understands the core idea with some gaps.
+4 = correct and clear with minor omissions.
+5 = complete, precise, and well explained.
+
+Only give 3 or higher when the learner demonstrates the central concept."""
+
+    prompt = {
+        "lesson": {
+            "lesson_id": lesson_context.get("lesson_id") or req.lesson_id,
+            "title": lesson_context.get("title"),
+            "overview": lesson_context.get("overview") or lesson_context.get("summary"),
+            "concepts": lesson_context.get("concepts"),
+        },
+        "question": req.question,
+        "reference_answer": req.reference_answer,
+        "rubric": req.rubric,
+        "learner_response": req.response,
+    }
+
+    client = create_bedrock_runtime_client(region=AWS_REGION)
+    response = client.converse(
+        modelId=MODEL_ID,
+        system=[{"text": system_prompt}],
+        messages=[{"role": "user", "content": [{"text": json.dumps(prompt, ensure_ascii=False, indent=2)}]}],
+        inferenceConfig={"maxTokens": 700, "temperature": 0},
+    )
+    raw_text = "".join(
+        block["text"]
+        for block in response["output"]["message"]["content"]
+        if "text" in block
+    ).strip()
+    parsed = _parse_llm_json(raw_text)
+    score = max(0, min(5, int(round(float(parsed.get("score", 0))))))
+    return {
+        "score": score,
+        "explanation": str(parsed.get("explanation") or "").strip(),
+        "strengths": parsed.get("strengths") or [],
+        "gaps": parsed.get("gaps") or [],
+    }
+
+
+@app.post("/lesson/score")
+def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
+    if not req.response.strip():
+        raise HTTPException(status_code=400, detail="response is required")
+
+    from personas import get_persona
+    from srs import PASSING_SCORE, advance_roadmap_progress, upsert_srs_record
+    from supabase.supabase_client import get_supabase_client
+
+    try:
+        persona = get_persona(req.persona)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    student_id = req.student_id or persona.get("student_id")
+    if not student_id:
+        raise HTTPException(status_code=400, detail="student_id is required")
+
+    course = req.course or persona.get("course") or "accounting"
+    lesson_context = _lesson_context_for_scoring(req.lesson_id, req.persona, course)
+
+    try:
+        scoring = _score_lesson_response(req, lesson_context)
+        supabase = get_supabase_client()
+        srs_record = upsert_srs_record(
+            student_id=student_id,
+            node_id=req.lesson_id,
+            course=course,
+            score=scoring["score"],
+            metadata={
+                "question": req.question,
+                "reference_answer": req.reference_answer,
+                "learner_response": req.response,
+                "scoring_explanation": scoring["explanation"],
+                "strengths": scoring["strengths"],
+                "gaps": scoring["gaps"],
+                **(req.metadata or {}),
+            },
+            client=supabase,
+        )
+
+        passed = scoring["score"] >= PASSING_SCORE
+        roadmap_progress = None
+        if passed:
+            roadmap_progress = advance_roadmap_progress(
+                student_id=student_id,
+                course=course,
+                lesson_id=req.lesson_id,
+                client=supabase,
+            )
+
+        return {
+            "student_id": student_id,
+            "lesson_id": req.lesson_id,
+            "course": course,
+            "score": scoring["score"],
+            "passed": passed,
+            "explanation": scoring["explanation"],
+            "strengths": scoring["strengths"],
+            "gaps": scoring["gaps"],
+            "srs_record": srs_record,
+            "roadmap_progress": roadmap_progress,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/srs/due")
+def get_due_reviews(
+    student_id: str = Query(default=""),
+    persona: str = Query(default="charles"),
+) -> dict[str, Any]:
+    from personas import get_persona
+    from srs import get_due_srs_records
+    from supabase.supabase_client import get_supabase_client
+
+    if not student_id:
+        try:
+            student_id = get_persona(persona).get("student_id", "")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if not student_id:
+        raise HTTPException(status_code=400, detail="student_id is required")
+
+    try:
+        due = get_due_srs_records(student_id, client=get_supabase_client())
+        return {"student_id": student_id, "due": due, "review_mode": bool(due)}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/lesson/chat")
