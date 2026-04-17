@@ -1,0 +1,277 @@
+"""
+Terminal-first lesson loop: ordered concepts → personalized Bedrock blocks → knowledge checks.
+
+Runs after the knowledge graph. No streaming, Redis, LangChain, or tool calls (v1).
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+
+_BACKEND_DIR = Path(__file__).resolve().parent
+# Match backend/server.py
+load_dotenv(dotenv_path=_BACKEND_DIR / ".env")
+sys.path.insert(0, str(_BACKEND_DIR))
+
+from bedrock.client import BearerTokenBedrockClient, create_bedrock_runtime_client
+
+# Load GLP supabase_client by file path — avoids shadowing the `supabase` PyPI package.
+_sc_path = _BACKEND_DIR / "supabase" / "supabase_client.py"
+_spec = importlib.util.spec_from_file_location("glp_supabase_client", _sc_path)
+if _spec is None or _spec.loader is None:
+    raise RuntimeError(f"Cannot load supabase client from {_sc_path}")
+_glp_sc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_glp_sc)
+get_student_profile = _glp_sc.get_student_profile
+
+# Default matches backend/server.py (Haiku). Override with BEDROCK_MODEL_ID.
+DEFAULT_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+MODEL_ID = os.getenv("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID)
+AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+
+JSON_SYSTEM_RULES = """You MUST respond with exactly one JSON object and nothing else.
+No markdown fences, no preamble, no trailing commentary.
+Schema:
+{
+  "explanation": "string",
+  "example": "string",
+  "knowledge_check": {
+    "question": "string",
+    "type": "free_response"
+  }
+}
+"""
+
+
+def build_prompt(
+    concept: dict[str, Any],
+    student_profile: dict[str, Any],
+) -> tuple[str, str]:
+    """Return (system_prompt, user_prompt) for Bedrock."""
+    system_prompt = (
+        "You are an expert tutor for a generative learning platform. "
+        "Personalize explanations to the learner. "
+        + JSON_SYSTEM_RULES
+    )
+
+    prereq = concept.get("prerequisites") or []
+    if not isinstance(prereq, list):
+        prereq = [prereq]
+
+    user_payload = {
+        "learner": {
+            "academic_level": student_profile.get("academic_level"),
+            "preferred_formats": student_profile.get("preferred_formats"),
+            "llm_profile": student_profile.get("llm_profile"),
+        },
+        "concept": {
+            "name": concept.get("concept"),
+            "difficulty": concept.get("difficulty"),
+            "order": concept.get("order"),
+            "prerequisite_names": prereq,
+        },
+        "task": (
+            "Write one teaching block for this concept only. "
+            "Assume the learner has seen the prerequisite concepts by name; "
+            "do not re-teach them in depth, but connect briefly where helpful."
+        ),
+    }
+    user_prompt = json.dumps(user_payload, ensure_ascii=False, indent=2)
+    return system_prompt, user_prompt
+
+
+def _parse_model_json_object(text: str) -> dict[str, Any]:
+    """
+    Parse a single JSON object from model text. Tolerates literal newlines / control
+    chars inside string values (same idea as server._parse_llm_json).
+    """
+    text = text.strip()
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        raise ValueError(f"Model returned no JSON object: {text[:500]}...")
+    raw = match.group(0)
+
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    def _escape_string(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        inner = inner.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+        inner = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", inner)
+        return f'"{inner}"'
+
+    fixed = re.sub(r'"((?:[^"\\]|\\.)*)"', _escape_string, raw, flags=re.DOTALL)
+    obj = json.loads(fixed)
+    if not isinstance(obj, dict):
+        raise ValueError("JSON root must be an object.")
+    return obj
+
+
+def _strip_markdown_fences(text: str) -> str:
+    t = text.strip()
+    if not t.startswith("```"):
+        return t
+    lines = t.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _anthropic_response_text(payload: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for block in payload.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text", "")))
+    return "".join(parts).strip()
+
+
+def _invoke_model_body(body: dict[str, Any]) -> dict[str, Any]:
+    client = create_bedrock_runtime_client(region=AWS_REGION)
+    if isinstance(client, BearerTokenBedrockClient):
+        wrapped = client.invoke_model(modelId=MODEL_ID, body=body)
+        return json.loads(wrapped["body"].read())
+
+    resp = client.invoke_model(
+        modelId=MODEL_ID,
+        body=json.dumps(body),
+        contentType="application/json",
+        accept="application/json",
+    )
+    raw = resp["body"].read()
+    if isinstance(raw, bytes):
+        return json.loads(raw.decode("utf-8"))
+    return json.loads(raw)
+
+
+def call_bedrock(system: str, user: str) -> dict[str, Any]:
+    """Invoke Bedrock (non-streaming), return normalized content block dict."""
+    body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 4096,
+        "temperature": 0.3,
+        "system": system,
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": user}],
+            }
+        ],
+    }
+    payload = _invoke_model_body(body)
+    raw_text = _anthropic_response_text(payload)
+    cleaned = _strip_markdown_fences(raw_text)
+    try:
+        parsed = _parse_model_json_object(cleaned)
+    except (json.JSONDecodeError, ValueError) as exc:
+        print("--- Raw model output (parse failed) ---")
+        print(raw_text)
+        raise RuntimeError(
+            "Bedrock returned JSON we could not parse (after fence strip + newline repair); "
+            "see raw text above."
+        ) from exc
+    if not isinstance(parsed, dict):
+        print("--- Raw model output (not a JSON object) ---")
+        print(raw_text)
+        raise RuntimeError("Bedrock JSON root must be an object.")
+    return _normalize_block(parsed)
+
+
+def _normalize_block(raw: dict[str, Any]) -> dict[str, Any]:
+    kc = raw.get("knowledge_check")
+    if not isinstance(kc, dict):
+        kc = {}
+    return {
+        "explanation": str(raw.get("explanation") or ""),
+        "example": str(raw.get("example") or ""),
+        "knowledge_check": {
+            "question": str(
+                kc.get("question") or "In one or two sentences, what is the main idea?"
+            ),
+            "type": str(kc.get("type") or "free_response"),
+        },
+    }
+
+
+def run_lesson_loop(student_id: str, ordered_concepts: list[dict[str, Any]]) -> None:
+    """
+    Load profile once, then for each concept: Bedrock block → print → input() pause.
+    Production roadmaps often use ~6 concepts; demos may use fewer.
+    """
+    profile = get_student_profile(student_id)
+    if profile is None:
+        raise RuntimeError(
+            f"No student profile for id={student_id!r}. "
+            "Seed students in Supabase (e.g. Alice) before running the lesson loop."
+        )
+
+    concepts = sorted(
+        ordered_concepts,
+        key=lambda c: (c.get("order") is None, c.get("order") or 0),
+    )
+
+    for i, concept in enumerate(concepts, start=1):
+        name = concept.get("concept", "(unnamed concept)")
+        print(f"\n{'=' * 60}\nConcept {i}/{len(concepts)}: {name}\n{'=' * 60}")
+
+        system_p, user_p = build_prompt(concept, profile)
+        block = call_bedrock(system_p, user_p)
+
+        print("\n--- Explanation ---\n")
+        print(block["explanation"])
+        print("\n--- Example ---\n")
+        print(block["example"])
+        print("\n--- Knowledge check ---\n")
+        print(block["knowledge_check"]["question"])
+        print(f"(type: {block['knowledge_check']['type']})\n")
+
+        input("Press Enter after you've answered (not graded in v1)… ")
+
+    print(f"\nDone — completed {len(concepts)} concept(s) for student {student_id!r}.")
+
+
+if __name__ == "__main__":
+    # Production typically ~6 ordered concepts from Neo4j; three here for a quicker terminal test.
+    alice = "a0000001-0000-4000-8000-000000000001"
+    mock_concepts: list[dict[str, Any]] = [
+        {
+            "order": 1,
+            "concept": "Variables",
+            "difficulty": "beginner",
+            "prerequisites": [],
+        },
+        {
+            "order": 2,
+            "concept": "Loops",
+            "difficulty": "beginner",
+            "prerequisites": ["Variables"],
+        },
+        {
+            "order": 3,
+            "concept": "Functions",
+            "difficulty": "beginner",
+            "prerequisites": ["Variables", "Loops"],
+        },
+    ]
+    print(f"Model: {MODEL_ID} | Region: {AWS_REGION}")
+    run_lesson_loop(alice, mock_concepts)
