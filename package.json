@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "codex": "^0.2.3"
+  },
+  "devDependencies": {
+    "supabase": "^2.92.1"
   }
 }

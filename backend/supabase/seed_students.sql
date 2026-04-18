@@ -9,7 +9,6 @@ insert into students (
   major_or_field,
   learning_goals,
   interests,
-  weekly_hours,
   preferred_formats,
   llm_profile
 ) values
@@ -23,14 +22,9 @@ insert into students (
     "coding_experience": "beginner",
     "target_course": "MIT 6.0001 Introduction to Computer Science and Programming in Python"
   }'::jsonb,
-  '[
-    "programming",
-    "python",
-    "MIT OpenCourseWare",
-    "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/download/"
-  ]'::jsonb,
+  '{"programming", "python", "MIT OpenCourseWare", "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/download/"}'::text[],
   5,
-  '["videos", "hands-on problems", "practice exercises"]'::jsonb,
+  '{"videos", "hands-on problems", "practice exercises"}'::text[],
   '{
     "learning_style_summary": "Beginner coder; responds well to video instruction and hands-on practice.",
     "subject_confidence": "beginner",
@@ -46,14 +40,9 @@ insert into students (
     "primary_focus": "Economic development and public finance",
     "topic_familiarity": "very_familiar"
   }'::jsonb,
-  '[
-    "economic development",
-    "public policy",
-    "MIT OpenCourseWare",
-    "https://ocw.mit.edu/courses/11-437-financing-economic-development-fall-2016/pages/syllabus/"
-  ]'::jsonb,
+  '{"economic development", "public policy", "MIT OpenCourseWare", "https://ocw.mit.edu/courses/11-437-financing-economic-development-fall-2016/pages/syllabus/"}'::text[],
   2,
-  '["reading", "worked examples", "AI interaction"]'::jsonb,
+  '{"reading", "worked examples", "AI interaction"}'::text[],
   '{
     "learning_style_summary": "Very familiar with the subject; prefers reading, concrete examples, and conversational AI support.",
     "subject_confidence": "comfortable",
@@ -69,14 +58,9 @@ insert into students (
     "primary_focus": "Financial and managerial accounting foundations",
     "coding_experience": "not_primary"
   }'::jsonb,
-  '[
-    "financial accounting",
-    "managerial accounting",
-    "MIT OpenCourseWare",
-    "https://ocw.mit.edu/courses/15-501-introduction-to-financial-and-managerial-accounting-spring-2004/"
-  ]'::jsonb,
+  '{"financial accounting", "managerial accounting", "MIT OpenCourseWare", "https://ocw.mit.edu/courses/15-501-introduction-to-financial-and-managerial-accounting-spring-2004/"}'::text[],
   10,
-  '["flashcards", "practice questions"]'::jsonb,
+  '{"flashcards", "practice questions"}'::text[],
   '{
     "learning_style_summary": "Prefers retrieval practice via flashcards and targeted practice questions.",
     "subject_confidence": "somewhat_familiar",

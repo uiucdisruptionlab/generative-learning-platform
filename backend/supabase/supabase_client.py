@@ -1,5 +1,6 @@
 """
-Supabase read/write for GLP — students, content_items, recommendations, content_interactions.
+Supabase read/write for GLP — students, content_items, recommendations, content_interactions,
+roadmap_cache, roadmap_position, srs_records.
 No LLM, Neo4j, or LangChain code here.
 """
 
@@ -51,6 +52,86 @@ def get_student_profile(
     )
     rows = response.data or []
     return rows[0] if rows else None
+
+
+def get_student(
+    student_id: str,
+    *,
+    client: Optional[Client] = None,
+) -> Optional[dict[str, Any]]:
+    """Alias for get_student_profile. Return one student row (all columns) or None if not found."""
+    return get_student_profile(student_id, client=client)
+
+
+def create_student(
+    student_data: dict[str, Any],
+    *,
+    client: Optional[Client] = None,
+) -> dict[str, Any]:
+    """
+    Create a new student record. Required: name.
+
+    Accepted keys: name, academic_level, major_or_field, learning_goals (dict → jsonb),
+    interests (list), weekly_hours (int), preferred_formats (list), llm_profile (dict → jsonb).
+    Returns the complete student record including id, created_at, and updated_at.
+    """
+    if not student_data.get("name"):
+        raise ValueError("student_data must include non-empty 'name'")
+
+    # Prepare the row data, filtering out None values
+    row = {
+        "name": str(student_data["name"]),
+        "academic_level": student_data.get("academic_level"),
+        "major_or_field": student_data.get("major_or_field"),
+        "learning_goals": student_data.get("learning_goals"),
+        "interests": student_data.get("interests"),
+        "weekly_hours": student_data.get("weekly_hours"),
+        "preferred_formats": student_data.get("preferred_formats"),
+        "llm_profile": student_data.get("llm_profile"),
+    }
+    # Drop keys that are None so defaults / DB nulls stay clean
+    row = {k: v for k, v in row.items() if v is not None}
+
+    supabase = client or get_supabase_client()
+    response = supabase.table("students").insert(row).execute()
+    data = response.data or []
+    if not data:
+        raise RuntimeError("create_student: no row returned from Supabase")
+    return data[0]
+
+
+def get_or_create_student(
+    student_data: dict[str, Any],
+    *,
+    client: Optional[Client] = None,
+) -> tuple[dict[str, Any], bool]:
+    """
+    Get existing student by name, or create new one if not found.
+    Returns (student_dict, created_bool) where created_bool is True if student was created.
+    """
+    if not student_data.get("name"):
+        raise ValueError("student_data must include non-empty 'name'")
+
+    name = student_data["name"]
+    supabase = client or get_supabase_client()
+
+    # Try to find existing student by name
+    response = (
+        supabase.table("students")
+        .select("*")
+        .eq("name", name)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+
+    if rows:
+        # Student exists
+        return rows[0], False
+    else:
+        # Create new student
+        student = create_student(student_data, client=client)
+        return student, True
 
 
 def insert_content_item(
@@ -161,6 +242,137 @@ def clear_recommendations(
     """Delete every recommendation row for this student (test resets)."""
     supabase = client or get_supabase_client()
     supabase.table("recommendations").delete().eq("student_id", student_id).execute()
+
+
+def get_cached_roadmap(
+    student_id: str,
+    node_ids: list[str],
+    *,
+    client: Optional[Client] = None,
+) -> Optional[dict[str, Any]]:
+    """Return cached roadmap row if student_id and node_ids match exactly, or None if not found."""
+    supabase = client or get_supabase_client()
+    response = (
+        supabase.table("roadmap_cache")
+        .select("*")
+        .eq("student_id", student_id)
+        .eq("node_ids", node_ids)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
+def save_roadmap_cache(
+    student_id: str,
+    node_ids: list[str],
+    *,
+    client: Optional[Client] = None,
+) -> str:
+    """Insert a new roadmap cache entry for a student. Returns the new row's UUID."""
+    supabase = client or get_supabase_client()
+    row = {"student_id": student_id, "node_ids": node_ids}
+    response = supabase.table("roadmap_cache").insert(row).execute()
+    data = response.data or []
+    if not data:
+        raise RuntimeError("save_roadmap_cache: no row returned from Supabase")
+    return str(data[0]["id"])
+
+
+def get_roadmap_position(
+    student_id: str,
+    *,
+    client: Optional[Client] = None,
+) -> Optional[int]:
+    """Return the current_index for a student's roadmap position, or None if not found."""
+    supabase = client or get_supabase_client()
+    response = (
+        supabase.table("roadmap_position")
+        .select("current_index")
+        .eq("student_id", student_id)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0]["current_index"] if rows else None
+
+
+def update_roadmap_position(
+    student_id: str,
+    current_index: int,
+    *,
+    client: Optional[Client] = None,
+) -> dict[str, Any]:
+    """Update or create the current_index for a student's roadmap position. Returns the updated row."""
+    supabase = client or get_supabase_client()
+    
+    # First try to update existing position
+    response = (
+        supabase.table("roadmap_position")
+        .update({"current_index": current_index})
+        .eq("student_id", student_id)
+        .execute()
+    )
+    
+    if response.data:
+        # Update succeeded
+        return response.data[0]
+    else:
+        # No existing position, create new one
+        row = {"student_id": student_id, "current_index": current_index}
+        response = supabase.table("roadmap_position").insert(row).execute()
+        data = response.data or []
+        if not data:
+            raise RuntimeError("update_roadmap_position: no row returned from Supabase")
+        return data[0]
+
+
+def get_due_reviews(
+    *,
+    client: Optional[Client] = None,
+) -> list[dict[str, Any]]:
+    """Get all SRS records that are due for review, ordered by most overdue first."""
+    supabase = client or get_supabase_client()
+    response = (
+        supabase.table("srs_records")
+        .select("*")
+        .lte("next_review_at", "now()")  # next_review_at <= current time
+        .order("next_review_at", desc=False)  # oldest (most overdue) first
+        .execute()
+    )
+    return list(response.data or [])
+
+
+def upsert_srs_record(
+    node_id: str,
+    ease_factor: float,
+    interval_days: int,
+    next_review_at: str,  # ISO timestamp string
+    last_reviewed_at: Optional[str] = None,  # ISO timestamp string
+    *,
+    client: Optional[Client] = None,
+) -> dict[str, Any]:
+    """
+    Insert or update an SRS record for a node.
+    If record exists for node_id, updates it; otherwise creates new record.
+    Returns the upserted record.
+    """
+    row = {
+        "node_id": node_id,
+        "ease_factor": float(ease_factor),
+        "interval_days": int(interval_days),
+        "next_review_at": next_review_at,
+    }
+    if last_reviewed_at is not None:
+        row["last_reviewed_at"] = last_reviewed_at
+
+    supabase = client or get_supabase_client()
+    response = supabase.table("srs_records").upsert(row).execute()
+    data = response.data or []
+    if not data:
+        raise RuntimeError("upsert_srs_record: no row returned from Supabase")
+    return data[0]
 
 
 if __name__ == "__main__":
