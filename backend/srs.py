@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 DEFAULT_EASE_FACTOR = 2.5
 MIN_EASE_FACTOR = 1.3
-PASSING_SCORE = 3
+PASSING_SCORE = 4
 
 
 def clamp_quality(score: int | float) -> int:

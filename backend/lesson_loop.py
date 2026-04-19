@@ -304,6 +304,23 @@ def _normalize_block(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+MAX_KNOWLEDGE_CHECK_ROUNDS = 50
+
+FOLLOW_UP_SYSTEM = """You respond with exactly one JSON object and nothing else.
+Schema: {"question": "string"}
+The learner almost passed (score 3/5). Write ONE new knowledge-check question on the SAME concept — slightly more specific or probing than before, without repeating the exact prior wording."""
+
+REMEDIATION_SYSTEM = """You respond with exactly one JSON object and nothing else.
+Schema:
+{
+  "mistake_feedback": "string",
+  "re_explanation": "string",
+  "new_question": "string"
+}
+The learner scored below 3/5. Briefly explain what was wrong or incomplete in their answer (mistake_feedback),
+give a short re-explanation of the core concept (re_explanation), then ask ONE new knowledge-check question (new_question).
+Keep re_explanation concise for a terminal session."""
+
 SCORING_SYSTEM_PROMPT = """You score free-response knowledge checks for a spaced repetition system.
 Return exactly one JSON object and nothing else.
 Schema:
@@ -320,14 +337,24 @@ Scoring rubric:
 4 = correct and clear with minor omissions.
 5 = complete, precise, and well explained.
 
-Only score 3 or higher when the learner demonstrates the central concept."""
+Only score 3 or higher when the learner demonstrates the central concept.
+Passing for advancement is score >= 4 (handled by the lesson loop)."""
 
 
 def score_knowledge_check(
     concept: dict[str, Any],
     block: dict[str, Any],
     learner_answer: str,
+    *,
+    remediation_context: str | None = None,
 ) -> dict[str, Any]:
+    teaching_block: dict[str, Any] = {
+        "explanation": block.get("explanation"),
+        "example": block.get("example"),
+    }
+    if remediation_context:
+        teaching_block["remediation_context"] = remediation_context
+
     payload = {
         "concept": {
             "id": concept_id_for_srs(concept),
@@ -335,10 +362,7 @@ def score_knowledge_check(
             "difficulty": concept.get("difficulty"),
             "prerequisites": concept.get("prerequisites") or [],
         },
-        "teaching_block": {
-            "explanation": block.get("explanation"),
-            "example": block.get("example"),
-        },
+        "teaching_block": teaching_block,
         "knowledge_check": block.get("knowledge_check") or {},
         "learner_answer": learner_answer,
     }
@@ -355,6 +379,62 @@ def score_knowledge_check(
         "score": score,
         "explanation": str(parsed.get("explanation") or "").strip(),
     }
+
+
+def _call_follow_up_question(
+    concept: dict[str, Any],
+    block: dict[str, Any],
+    scoring: dict[str, Any],
+    learner_answer: str,
+) -> str:
+    user = json.dumps(
+        {
+            "concept_name": concept.get("concept"),
+            "teaching_explanation": block.get("explanation"),
+            "teaching_example": block.get("example"),
+            "current_knowledge_check": block.get("knowledge_check") or {},
+            "learner_answer": learner_answer,
+            "score": scoring.get("score"),
+            "scoring_explanation": scoring.get("explanation"),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    raw = _call_bedrock_json(FOLLOW_UP_SYSTEM, user, temperature=0.35)
+    q = str(raw.get("question") or "").strip()
+    if not q:
+        raise RuntimeError("Follow-up model returned an empty question.")
+    return q
+
+
+def _call_remediation(
+    concept: dict[str, Any],
+    block: dict[str, Any],
+    scoring: dict[str, Any],
+    learner_answer: str,
+) -> dict[str, str]:
+    user = json.dumps(
+        {
+            "concept_name": concept.get("concept"),
+            "teaching_explanation": block.get("explanation"),
+            "teaching_example": block.get("example"),
+            "knowledge_check": block.get("knowledge_check") or {},
+            "learner_answer": learner_answer,
+            "score": scoring.get("score"),
+            "scoring_explanation": scoring.get("explanation"),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    raw = _call_bedrock_json(REMEDIATION_SYSTEM, user, temperature=0.35)
+    out = {
+        "mistake_feedback": str(raw.get("mistake_feedback") or "").strip(),
+        "re_explanation": str(raw.get("re_explanation") or "").strip(),
+        "new_question": str(raw.get("new_question") or "").strip(),
+    }
+    if not out["new_question"]:
+        raise RuntimeError("Remediation model returned an empty new_question.")
+    return out
 
 
 def concept_id_for_srs(concept: dict[str, Any]) -> str:
@@ -402,30 +482,83 @@ def run_lesson_loop(student_id: str, ordered_concepts: list[dict[str, Any]]) -> 
         print(block["knowledge_check"]["question"])
         print(f"(type: {block['knowledge_check']['type']})\n")
 
-        learner_answer = input("Your answer: ").strip()
-        if not learner_answer:
-            learner_answer = "(blank)"
+        remediation_context: str | None = None
+        round_num = 0
 
-        scoring = score_knowledge_check(concept, block, learner_answer)
-        srs_record = upsert_srs_record(
-            student_id=student_id,
-            concept_id=concept_id_for_srs(concept),
-            course=None,
-            score=scoring["score"],
-            metadata={
-                "knowledge_check": block.get("knowledge_check"),
-                "learner_answer": learner_answer,
-                "scoring_explanation": scoring["explanation"],
-            },
-            client=supabase,
-        )
+        while round_num < MAX_KNOWLEDGE_CHECK_ROUNDS:
+            round_num += 1
+            learner_answer = input("Your answer: ").strip()
+            if not learner_answer:
+                learner_answer = "(blank)"
 
-        outcome = "passed" if scoring["score"] >= PASSING_SCORE else "needs review"
-        print(
-            f"\nScore: {scoring['score']}/5 ({outcome})\n"
-            f"Why: {scoring['explanation'] or 'No explanation returned.'}\n"
-            f"Next review: {srs_record.get('next_review_at')}\n"
-        )
+            scoring = score_knowledge_check(
+                concept,
+                block,
+                learner_answer,
+                remediation_context=remediation_context,
+            )
+
+            srs_record = upsert_srs_record(
+                student_id=student_id,
+                concept_id=concept_id_for_srs(concept),
+                course=None,
+                score=scoring["score"],
+                metadata={
+                    "knowledge_check": block.get("knowledge_check"),
+                    "learner_answer": learner_answer,
+                    "scoring_explanation": scoring["explanation"],
+                    "knowledge_check_round": round_num,
+                },
+                client=supabase,
+            )
+
+            outcome = (
+                "ready for next concept"
+                if scoring["score"] >= PASSING_SCORE
+                else "needs another pass at this concept"
+            )
+            print(
+                f"\nScore: {scoring['score']}/5 — {outcome}\n"
+                f"Why: {scoring['explanation'] or 'No explanation returned.'}\n"
+                f"Next review (SRS): {srs_record.get('next_review_at')}\n"
+            )
+
+            if scoring["score"] >= PASSING_SCORE:
+                break
+
+            if scoring["score"] == 3:
+                print("\n--- Follow-up question (almost there) ---\n")
+                fq = _call_follow_up_question(
+                    concept, block, scoring, learner_answer
+                )
+                block["knowledge_check"]["question"] = fq
+                remediation_context = None
+                print(fq)
+                print(f"(type: {block['knowledge_check'].get('type', 'free_response')})\n")
+                continue
+
+            print("\n--- Feedback ---\n")
+            rem = _call_remediation(concept, block, scoring, learner_answer)
+            print(rem["mistake_feedback"])
+            print("\n--- Quick review ---\n")
+            print(rem["re_explanation"])
+            block["knowledge_check"]["question"] = rem["new_question"]
+            remediation_context = (
+                f"Mistake feedback shown: {rem['mistake_feedback']}\n"
+                f"Re-explanation shown: {rem['re_explanation']}"
+            )
+            print("\n--- New knowledge check ---\n")
+            print(rem["new_question"])
+            print(
+                f"(type: {block['knowledge_check'].get('type', 'free_response')})\n"
+            )
+            continue
+
+        else:
+            print(
+                f"\nStopped after {MAX_KNOWLEDGE_CHECK_ROUNDS} rounds on this concept "
+                "(safety limit). Moving on.\n"
+            )
 
     print(f"\nDone — completed {len(concepts)} concept(s) for student {student_id!r}.")
 
