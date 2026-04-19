@@ -15,9 +15,11 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-# Repo root: .../generative-learning-platform (this file is backend/supabase/...)
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=_ENV_PATH)
+# Repo root and backend/.env — same precedence as backend/lesson_loop.py (backend overrides root).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(dotenv_path=_REPO_ROOT / ".env")
+load_dotenv(dotenv_path=_BACKEND_DIR / ".env", override=True)
 
 # Matches seed_students.sql — use for local demo after seeding.
 DEMO_STUDENT_ALICE_ID = "a0000001-0000-4000-8000-000000000001"
@@ -217,8 +219,9 @@ def _demo_overdue_reviews() -> None:
     row = {
         "student_id": alice,
         "concept_id": demo_concept_id,
+        "node_id": demo_concept_id,
         "ease_factor": 2.5,
-        "interval": 1,
+        "interval_days": 1,
         "repetitions": 0,
         "score": 3,
         "next_review_at": past,

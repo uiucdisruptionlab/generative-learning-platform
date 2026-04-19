@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -51,6 +52,10 @@ Schema:
     "type": "free_response"
   }
 }
+
+JSON string rules (critical): every value is a JSON string. Inside a string you may use literal newlines,
+but any double-quote character inside the string MUST be written as backslash-doublequote (\\").
+In Python code samples, prefer single-quoted strings (e.g. input('x')) to avoid escaping quotes.
 """
 
 
@@ -91,6 +96,77 @@ def build_prompt(
     return system_prompt, user_prompt
 
 
+def _unescape_json_string_body(s: str) -> str:
+    """Decode JSON escapes inside a string body (no surrounding quotes)."""
+    out: list[str] = []
+    i = 0
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s):
+            n = s[i + 1]
+            if n in '"\\':
+                out.append(n)
+                i += 2
+                continue
+            if n == "n":
+                out.append("\n")
+                i += 2
+                continue
+            if n == "r":
+                out.append("\r")
+                i += 2
+                continue
+            if n == "t":
+                out.append("\t")
+                i += 2
+                continue
+            if n == "u" and i + 5 < len(s):
+                try:
+                    out.append(chr(int(s[i + 2 : i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+        out.append(s[i])
+        i += 1
+    return "".join(out)
+
+
+def _fallback_parse_teaching_json(text: str) -> dict[str, Any]:
+    """
+    Recover teaching block JSON when standard parse fails (e.g. unescaped " inside
+    "example" from Python code like input("x")). Slices string fields using key boundaries.
+    """
+    exp_m = re.search(r'"explanation"\s*:\s*"', text)
+    ex_m = re.search(r'"example"\s*:\s*"', text)
+    kc_m = re.search(r'"knowledge_check"\s*:\s*\{', text)
+    if not exp_m or not ex_m or not kc_m:
+        raise ValueError("fallback: missing explanation, example, or knowledge_check")
+
+    exp_start = exp_m.end()
+    exp_end_rel = re.search(r'"\s*,\s*"example"', text[exp_start:])
+    if not exp_end_rel:
+        raise ValueError("fallback: could not close explanation string")
+    explanation = _unescape_json_string_body(text[exp_start : exp_start + exp_end_rel.start()])
+
+    ex_start = ex_m.end()
+    ex_end_rel = re.search(r'"\s*,\s*"knowledge_check"', text[ex_start:])
+    if not ex_end_rel:
+        raise ValueError("fallback: could not close example string")
+    example = _unescape_json_string_body(text[ex_start : ex_start + ex_end_rel.start()])
+
+    brace_open = kc_m.end() - 1
+    dec = json.JSONDecoder()
+    kc_obj, _ = dec.raw_decode(text, brace_open)
+    if not isinstance(kc_obj, dict):
+        raise ValueError("fallback: knowledge_check must be an object")
+
+    return {
+        "explanation": explanation,
+        "example": example,
+        "knowledge_check": kc_obj,
+    }
+
+
 def _parse_model_json_object(text: str) -> dict[str, Any]:
     """
     Parse a single JSON object from model text. Tolerates literal newlines / control
@@ -122,11 +198,18 @@ def _parse_model_json_object(text: str) -> dict[str, Any]:
         inner = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", inner)
         return f'"{inner}"'
 
-    fixed = re.sub(r'"((?:[^"\\]|\\.)*)"', _escape_string, raw, flags=re.DOTALL)
-    obj = json.loads(fixed)
-    if not isinstance(obj, dict):
-        raise ValueError("JSON root must be an object.")
-    return obj
+    try:
+        fixed = re.sub(r'"((?:[^"\\]|\\.)*)"', _escape_string, raw, flags=re.DOTALL)
+        obj = json.loads(fixed)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        return _fallback_parse_teaching_json(text)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not parse model JSON: {exc}") from exc
 
 
 def _strip_markdown_fences(text: str) -> str:
@@ -371,4 +454,11 @@ if __name__ == "__main__":
         },
     ]
     print(f"Model: {MODEL_ID} | Region: {AWS_REGION}")
+    api = os.getenv("SUPABASE_URL", "").strip()
+    if api:
+        host = urlparse(api).netloc or "(parse error)"
+        print(
+            f"Supabase REST host: {host} "
+            "(SRS column errors → run backend/supabase/migrations/ensure_srs_records_schema.sql.)"
+        )
     run_lesson_loop(alice, mock_concepts)

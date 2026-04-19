@@ -21,7 +21,9 @@ def run_sm2(score: int | float, previous: dict[str, Any] | None = None) -> dict[
     previous = previous or {}
 
     old_repetitions = int(previous.get("repetitions") or 0)
-    old_interval = int(previous.get("interval") or previous.get("interval_days") or 0)
+    old_interval = int(
+        previous.get("interval_days") or previous.get("interval") or 0
+    )
     old_ease = float(previous.get("ease_factor") or DEFAULT_EASE_FACTOR)
 
     ease_factor = old_ease + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
@@ -46,7 +48,6 @@ def run_sm2(score: int | float, previous: dict[str, Any] | None = None) -> dict[
         "quality": quality,
         "ease_factor": round(ease_factor, 4),
         "interval_days": interval_days,
-        "interval": interval_days,
         "repetitions": repetitions,
         "last_reviewed_at": reviewed_at.isoformat(),
         "next_review_at": next_review_at.isoformat(),
@@ -92,9 +93,10 @@ def upsert_srs_record(
     row = {
         "student_id": student_id,
         "concept_id": concept_id,
+        "node_id": concept_id,
         "score": schedule["quality"],
         "ease_factor": schedule["ease_factor"],
-        "interval": schedule["interval"],
+        "interval_days": schedule["interval_days"],
         "repetitions": schedule["repetitions"],
         "next_review_at": schedule["next_review_at"],
     }
