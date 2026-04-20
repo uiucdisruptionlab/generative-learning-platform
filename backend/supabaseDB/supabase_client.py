@@ -246,33 +246,50 @@ def clear_recommendations(
 
 def get_cached_roadmap(
     student_id: str,
-    node_ids: list[str],
     *,
     client: Optional[Client] = None,
-) -> Optional[dict[str, Any]]:
-    """Return cached roadmap row if student_id and node_ids match exactly, or None if not found."""
+) -> Optional[list[str]]:
+    """Return the ordered list of lesson UUIDs for a student, or None if not cached."""
     supabase = client or get_supabase_client()
     response = (
         supabase.table("roadmap_cache")
-        .select("*")
+        .select("roadmap")
         .eq("student_id", student_id)
-        .eq("node_ids", node_ids)
         .limit(1)
         .execute()
     )
     rows = response.data or []
-    return rows[0] if rows else None
+    return rows[0]["roadmap"] if rows else None
 
 
 def save_roadmap_cache(
     student_id: str,
-    node_ids: list[str],
+    roadmap: list[str],
     *,
     client: Optional[Client] = None,
 ) -> str:
-    """Insert a new roadmap cache entry for a student. Returns the new row's UUID."""
+    """Upsert the ordered lesson UUID list for a student. Returns the cache row UUID.
+
+    Args:
+        student_id: The student's UUID.
+        roadmap: Ordered list of lesson UUIDs from the lessons table.
+    """
     supabase = client or get_supabase_client()
-    row = {"student_id": student_id, "node_ids": node_ids}
+    row = {"student_id": student_id, "roadmap": roadmap}
+
+    existing = (
+        supabase.table("roadmap_cache")
+        .select("id")
+        .eq("student_id", student_id)
+        .limit(1)
+        .execute()
+    )
+
+    if existing.data:
+        uuid = str(existing.data[0]["id"])
+        supabase.table("roadmap_cache").update(row).eq("id", uuid).execute()
+        return uuid
+
     response = supabase.table("roadmap_cache").insert(row).execute()
     data = response.data or []
     if not data:
@@ -329,16 +346,18 @@ def update_roadmap_position(
 
 
 def get_due_reviews(
+    student_id: str,
     *,
     client: Optional[Client] = None,
 ) -> list[dict[str, Any]]:
-    """Get all SRS records that are due for review, ordered by most overdue first."""
+    """Return SRS records due for review for a student, ordered by most overdue first."""
     supabase = client or get_supabase_client()
     response = (
         supabase.table("srs_records")
         .select("*")
-        .lte("next_review_at", "now()")  # next_review_at <= current time
-        .order("next_review_at", desc=False)  # oldest (most overdue) first
+        .eq("student_id", student_id)
+        .lte("next_review_at", "now()")
+        .order("next_review_at", desc=False)
         .execute()
     )
     return list(response.data or [])
@@ -373,6 +392,132 @@ def upsert_srs_record(
     if not data:
         raise RuntimeError("upsert_srs_record: no row returned from Supabase")
     return data[0]
+
+
+def upsert_lesson(
+    student_id: str,
+    lesson: dict[str, Any],
+    *,
+    client: Optional[Client] = None,
+) -> str:
+    """Upsert a lesson row for a student. Returns the lesson UUID.
+
+    Args:
+        student_id: The student's UUID.
+        lesson: Dict with keys: lesson_id, title, concepts, prerequisites,
+                chunk_ids, lecture_ids.
+    """
+    supabase = client or get_supabase_client()
+    row = {
+        "student_id": student_id,
+        "lesson_id": lesson["lesson_id"],
+        "title": lesson["title"],
+        "concepts": lesson.get("concepts"),
+        "prerequisites": lesson.get("prerequisites"),
+        "chunk_ids": lesson.get("chunk_ids"),
+        "lecture_ids": lesson.get("lecture_ids"),
+    }
+
+    existing = (
+        supabase.table("lessons")
+        .select("id")
+        .eq("student_id", student_id)
+        .eq("lesson_id", lesson["lesson_id"])
+        .limit(1)
+        .execute()
+    )
+
+    if existing.data:
+        uuid = str(existing.data[0]["id"])
+        supabase.table("lessons").update(row).eq("id", uuid).execute()
+        return uuid
+
+    response = supabase.table("lessons").insert(row).execute()
+    data = response.data or []
+    if not data:
+        raise RuntimeError("upsert_lesson: no row returned from Supabase")
+    return str(data[0]["id"])
+
+
+def get_lesson(
+    lesson_uuid: str,
+    *,
+    client: Optional[Client] = None,
+) -> Optional[dict[str, Any]]:
+    """Return a single lesson row by UUID, or None if not found."""
+    supabase = client or get_supabase_client()
+    response = (
+        supabase.table("lessons")
+        .select("*")
+        .eq("id", lesson_uuid)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
+def get_lessons_for_student(
+    student_id: str,
+    *,
+    client: Optional[Client] = None,
+) -> list[dict[str, Any]]:
+    """Return all lesson rows for a student."""
+    supabase = client or get_supabase_client()
+    response = (
+        supabase.table("lessons")
+        .select("*")
+        .eq("student_id", student_id)
+        .execute()
+    )
+    return list(response.data or [])
+
+
+def insert_message(
+    student_id: str,
+    lesson_uuid: str,
+    role: str,
+    content: str,
+    *,
+    client: Optional[Client] = None,
+) -> dict[str, Any]:
+    """Append a message to the messages table. Returns the new row.
+
+    Args:
+        student_id: The student's UUID.
+        lesson_uuid: The UUID of the lesson this message belongs to.
+        role: Message role, e.g. 'user' or 'assistant'.
+        content: Message text.
+    """
+    supabase = client or get_supabase_client()
+    row = {
+        "student_id": student_id,
+        "lesson_id": lesson_uuid,
+        "role": role,
+        "content": content,
+    }
+    response = supabase.table("messages").insert(row).execute()
+    data = response.data or []
+    if not data:
+        raise RuntimeError("insert_message: no row returned from Supabase")
+    return data[0]
+
+
+def get_messages_for_lesson(
+    lesson_uuid: str,
+    *,
+    client: Optional[Client] = None,
+) -> list[dict[str, Any]]:
+    """Return all messages for a lesson ordered by created_at ASC."""
+    supabase = client or get_supabase_client()
+    response = (
+        supabase.table("messages")
+        .select("*")
+        .eq("lesson_id", lesson_uuid)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return list(response.data or [])
 
 
 if __name__ == "__main__":
