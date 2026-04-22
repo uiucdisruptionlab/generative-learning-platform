@@ -38,12 +38,45 @@ export type LessonContent = {
   concepts?: LessonConcept[]
 }
 
+export type FlashcardPayload = {
+  front: string
+  back: string
+  hintFront: string
+  hintBack: string
+}
+
+export type FlashcardComponent = {
+  type: 'flashcard'
+  payloads: FlashcardPayload[]
+}
+
+export type FlashcardRequest = {
+  topic: string
+  persona?: string
+  lesson_id?: string
+  course?: string
+  source_text?: string
+  count?: number
+}
+
 export async function fetchLesson(lessonId: string, persona: string, course?: string): Promise<LessonContent> {
   const params = new URLSearchParams({ persona })
   if (course) params.set('course', course)
   const res = await fetch(`${API_URL}/lesson/${lessonId}?${params.toString()}`)
   if (!res.ok) {
     throw new Error(`Failed to fetch lesson: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function createFlashcard(payload: FlashcardRequest): Promise<FlashcardComponent> {
+  const res = await fetch(`${API_URL}/components/flashcard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to create flashcard: ${res.status}`)
   }
   return res.json()
 }

@@ -141,6 +141,27 @@ class ChatResponse(BaseModel):
     done: bool
 
 
+class FlashcardRequest(BaseModel):
+    topic: str
+    persona: str = "charles"
+    lesson_id: str | None = None
+    course: str | None = None
+    source_text: str | None = None
+    count: int = 3
+
+
+class FlashcardPayload(BaseModel):
+    front: str
+    back: str
+    hintFront: str = "Click the card to reveal the answer"
+    hintBack: str = "Click again to see the question"
+
+
+class FlashcardResponse(BaseModel):
+    type: str = "flashcard"
+    payloads: List[FlashcardPayload]
+
+
 # ---------------------------------------------------------------------------
 # Core logic (mirror of onboarding_demo.py)
 # ---------------------------------------------------------------------------
@@ -430,6 +451,113 @@ def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | No
     return data
 
 
+def _lesson_context_for_component(lesson_id: str | None, persona: str, course: str | None) -> dict[str, Any]:
+    if not lesson_id:
+        return {}
+
+    cached = _load_lesson_cache(persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
+    if cached:
+        return cached
+
+    if course:
+        roadmap = _load_roadmap_cache(course) or {}
+        for lesson in roadmap.get("lessons", []):
+            if lesson.get("lesson_id") == lesson_id:
+                return lesson
+
+    return {"lesson_id": lesson_id}
+
+
+def _generate_flashcard(req: FlashcardRequest) -> FlashcardResponse:
+    from personas import get_persona
+
+    persona = get_persona(req.persona)
+    lesson_context = _lesson_context_for_component(req.lesson_id, req.persona, req.course)
+    count = max(1, min(req.count, 8))
+    concepts = lesson_context.get("concepts") or []
+    concept_text = ", ".join(
+        c.get("name", "") for c in concepts if isinstance(c, dict) and c.get("name")
+    )
+
+    system_prompt = """You create personalized learning flashcards.
+Return valid JSON only. No markdown. No prose outside JSON.
+
+Use this schema:
+{
+  "flashcards": [
+    {
+      "front": "string",
+      "back": "string",
+      "hintFront": "string",
+      "hintBack": "string"
+    }
+  ]
+}
+
+Rules:
+- Make exactly the requested number of flashcards.
+- Each front should ask one focused question or prompt.
+- Each back should answer clearly in 1-3 concise sentences.
+- Avoid duplicate flashcards. Cover different concepts, examples, or common confusions.
+- Use the provided source or lesson context when available.
+- Adapt wording to the learner profile.
+- Do not include facts that are unsupported by the provided context unless the topic is general enough to answer safely.
+"""
+
+    prompt = {
+        "topic": req.topic,
+        "learner_profile": {
+            "name": persona.get("name"),
+            "major": persona.get("major"),
+            "familiarity": persona.get("familiarity"),
+            "learning_style": persona.get("learning_style"),
+            "notes": persona.get("notes"),
+        },
+        "lesson_context": {
+            "lesson_id": lesson_context.get("lesson_id") or req.lesson_id,
+            "title": lesson_context.get("title"),
+            "overview": lesson_context.get("overview") or lesson_context.get("summary"),
+            "concepts": concept_text,
+        },
+        "source_text": req.source_text,
+        "requested_count": count,
+    }
+
+    client = create_bedrock_runtime_client(region=AWS_REGION)
+    response = client.converse(
+        modelId=MODEL_ID,
+        system=[{"text": system_prompt}],
+        messages=[{"role": "user", "content": [{"text": json.dumps(prompt, ensure_ascii=False, indent=2)}]}],
+        inferenceConfig={"maxTokens": 1200, "temperature": 0.2},
+    )
+    raw_text = "".join(
+        block["text"]
+        for block in response["output"]["message"]["content"]
+        if "text" in block
+    ).strip()
+    parsed = _parse_llm_json(raw_text)
+    raw_flashcards = parsed.get("flashcards")
+    if not isinstance(raw_flashcards, list):
+        raw_flashcards = [parsed]
+
+    payloads: list[FlashcardPayload] = []
+    for raw_card in raw_flashcards[:count]:
+        if not isinstance(raw_card, dict):
+            continue
+        payload = FlashcardPayload(
+            front=str(raw_card.get("front") or "").strip(),
+            back=str(raw_card.get("back") or "").strip(),
+            hintFront=str(raw_card.get("hintFront") or "Click the card to reveal the answer").strip(),
+            hintBack=str(raw_card.get("hintBack") or "Click again to see the question").strip(),
+        )
+        if payload.front and payload.back:
+            payloads.append(payload)
+
+    if not payloads:
+        raise ValueError("Flashcard generation returned no usable flashcards.")
+    return FlashcardResponse(payloads=payloads)
+
+
 @app.get("/lesson/{lesson_id}")
 def get_lesson(lesson_id: str, persona: str = Query(default="charles"), course: str | None = Query(default=None)):
     cached = _load_lesson_cache(persona, lesson_id, course)
@@ -447,6 +575,21 @@ def get_lesson(lesson_id: str, persona: str = Query(default="charles"), course: 
 def rebuild_lesson(lesson_id: str, persona: str = Query(default="charles"), course: str | None = Query(default=None)):
     try:
         return _generate_and_cache_lesson(lesson_id, persona, course)
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/components/flashcard", response_model=FlashcardResponse)
+def create_flashcard(req: FlashcardRequest) -> FlashcardResponse:
+    if not req.topic.strip():
+        raise HTTPException(status_code=400, detail="topic is required")
+
+    try:
+        return _generate_flashcard(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         import traceback
         traceback.print_exc()

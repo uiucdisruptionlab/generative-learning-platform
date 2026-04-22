@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
+import LearningFlashcard from '../components/LearningFlashcard'
 import { usePersona } from '../contexts/PersonaContext'
-import { fetchLesson, scoreLessonResponse, streamLessonChat, type LessonContent, type LessonQuestion, type ChatMessage, type LessonScoreResponse } from '../api/lesson'
+import { createFlashcard, fetchLesson, scoreLessonResponse, streamLessonChat, type LessonContent, type LessonQuestion, type ChatMessage, type LessonScoreResponse, type FlashcardComponent } from '../api/lesson'
 
 // ---------- Video card ----------
 
@@ -226,6 +227,9 @@ export default function LessonPage() {
   const [scoring, setScoring] = useState(false)
   const [scoreResult, setScoreResult] = useState<LessonScoreResponse | null>(null)
   const [scoreError, setScoreError] = useState<string | null>(null)
+  const [flashcards, setFlashcards] = useState<FlashcardComponent | null>(null)
+  const [flashcardLoading, setFlashcardLoading] = useState(false)
+  const [flashcardError, setFlashcardError] = useState<string | null>(null)
 
   const persona = currentPersona === 'demo' ? 'charles' : currentPersona
 
@@ -235,6 +239,8 @@ export default function LessonPage() {
     setAnswers({})
     setScoreResult(null)
     setScoreError(null)
+    setFlashcards(null)
+    setFlashcardError(null)
     fetchLesson(lessonId, persona, courseOverride)
       .then((data) => { setLesson(data); setError(null) })
       .catch((err) => setError(String(err)))
@@ -253,6 +259,32 @@ export default function LessonPage() {
       else delete next[index]
       return next
     })
+  }
+
+  const handleCreateFlashcard = async () => {
+    if (!lesson || !lessonId || flashcardLoading) return
+
+    setFlashcardLoading(true)
+    setFlashcardError(null)
+    try {
+      const sourceText = [
+        lesson.overview,
+        ...lesson.steps.map((step) => `${step.title}: ${step.content}`),
+      ].filter(Boolean).join('\n\n')
+      const result = await createFlashcard({
+        topic: lesson.title,
+        persona,
+        lesson_id: lessonId,
+        course: courseOverride,
+        source_text: sourceText,
+        count: 3,
+      })
+      setFlashcards(result)
+    } catch (err) {
+      setFlashcardError(String(err))
+    } finally {
+      setFlashcardLoading(false)
+    }
   }
 
   const handleRecordProgress = async () => {
@@ -319,6 +351,45 @@ export default function LessonPage() {
             {/* Overview */}
             <div className="rounded-2xl bg-primary/5 dark:bg-primary/10 border-2 border-primary/20 p-5">
               <p className="text-slate-700 dark:text-slate-300 leading-relaxed">{lesson.overview}</p>
+            </div>
+
+            {/* Flashcard */}
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Flashcard Review</h3>
+                <button
+                  type="button"
+                  onClick={handleCreateFlashcard}
+                  disabled={flashcardLoading}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary-light disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <span className={`material-symbols-outlined text-base ${flashcardLoading ? 'animate-spin' : ''}`}>
+                    {flashcardLoading ? 'progress_activity' : 'flip_to_back'}
+                  </span>
+                  {flashcardLoading ? 'Generating...' : flashcards ? 'Regenerate' : 'Generate'}
+                </button>
+              </div>
+
+              {flashcardError && (
+                <div className="rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                  Failed to generate flashcard: {flashcardError}
+                </div>
+              )}
+
+              {flashcards && (
+                <div className="space-y-4">
+                  {flashcards.payloads.map((card, index) => (
+                    <LearningFlashcard
+                      key={`${card.front}-${index}`}
+                      title={`Generated flashcard ${index + 1}`}
+                      front={card.front}
+                      back={card.back}
+                      hintFront={card.hintFront}
+                      hintBack={card.hintBack}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Steps — all rendered as a scroll */}
