@@ -222,12 +222,14 @@ def _parse_llm_json(text: str) -> Dict[str, Any]:
     # Find every quoted string and escape any bare control characters inside it.
     def _escape_string(m: re.Match) -> str:  # type: ignore[type-arg]
         inner = m.group(1)
-        inner = inner.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+        inner = inner.replace("\n", "\\n").replace(
+            "\r", "\\r").replace("\t", "\\t")
         # Remove any remaining non-printable control chars
         inner = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", inner)
         return f'"{inner}"'
 
-    cleaned = re.sub(r'"((?:[^"\\]|\\.)*)"', _escape_string, raw, flags=re.DOTALL)
+    cleaned = re.sub(r'"((?:[^"\\]|\\.)*)"',
+                     _escape_string, raw, flags=re.DOTALL)
     return json.loads(cleaned)
 
 
@@ -341,13 +343,15 @@ def _load_roadmap_cache(course: str) -> dict | None:
 
 
 def _save_roadmap_cache(course: str, data: dict) -> None:
-    _course_cache_path(course).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _course_cache_path(course).write_text(json.dumps(
+        data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _build_and_cache(course: str, lecture_id: str | None) -> dict:
     from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
     if lecture_id:
-        data = build_roadmap_for_lecture(lecture_id, course=course, refine_with_llm=True)
+        data = build_roadmap_for_lecture(
+            lecture_id, course=course, refine_with_llm=True)
     else:
         data = build_roadmap(course=course, refine_with_llm=True)
     _save_roadmap_cache(course, data)
@@ -404,12 +408,14 @@ def _load_lesson_cache(persona_id: str, lesson_id: str, course: str | None = Non
 def _save_lesson_cache(persona_id: str, lesson_id: str, data: dict, course: str | None = None) -> None:
     path = _get_lesson_cache_path(persona_id, lesson_id, course)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps(
+        data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | None = None) -> dict:
     from lesson_generator import generate_lesson
-    data = generate_lesson(lesson_id=lesson_id, persona_id=persona_id, course_override=course)
+    data = generate_lesson(lesson_id=lesson_id,
+                           persona_id=persona_id, course_override=course)
     source_course = course
     if not source_course:
         try:
@@ -424,7 +430,8 @@ def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | No
                 data.setdefault("concepts", lesson.get("concepts", []))
                 data.setdefault("chunk_ids", lesson.get("chunk_ids", []))
                 data.setdefault("lecture_ids", lesson.get("lecture_ids", []))
-                data.setdefault("prerequisites", lesson.get("prerequisites", []))
+                data.setdefault("prerequisites",
+                                lesson.get("prerequisites", []))
                 break
     _save_lesson_cache(persona_id, lesson_id, data, course)
     return data
@@ -484,7 +491,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             return
 
         try:
-            assistant_reply, updated_profile, done = _process_llm_response(raw_text, profile, latest)
+            assistant_reply, updated_profile, done = _process_llm_response(
+                raw_text, profile, latest)
         except Exception as exc:
             yield _sse({"type": "error", "message": f"Parse error: {exc}"})
             return
@@ -505,6 +513,7 @@ class LessonChatMessage(BaseModel):
     role: str
     content: str
 
+
 class LessonChatRequest(BaseModel):
     lesson_id: str
     persona: str
@@ -524,7 +533,8 @@ class LessonScoreRequest(BaseModel):
 
 
 def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None) -> dict[str, Any]:
-    cached = _load_lesson_cache(persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
+    cached = _load_lesson_cache(
+        persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
     if cached:
         return cached
 
@@ -576,7 +586,8 @@ Only give 3 or higher when the learner demonstrates the central concept."""
     response = client.converse(
         modelId=MODEL_ID,
         system=[{"text": system_prompt}],
-        messages=[{"role": "user", "content": [{"text": json.dumps(prompt, ensure_ascii=False, indent=2)}]}],
+        messages=[{"role": "user", "content": [
+            {"text": json.dumps(prompt, ensure_ascii=False, indent=2)}]}],
         inferenceConfig={"maxTokens": 700, "temperature": 0},
     )
     raw_text = "".join(
@@ -613,7 +624,8 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="student_id is required")
 
     course = req.course or persona.get("course") or "accounting"
-    lesson_context = _lesson_context_for_scoring(req.lesson_id, req.persona, course)
+    lesson_context = _lesson_context_for_scoring(
+        req.lesson_id, req.persona, course)
 
     try:
         scoring = _score_lesson_response(req, lesson_context)
@@ -698,7 +710,8 @@ async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
     if cached:
         title = cached.get("title", "")
         overview = cached.get("overview", "")
-        concepts = ", ".join(c["name"] for c in cached.get("concepts", []) if isinstance(c, dict))
+        concepts = ", ".join(c["name"] for c in cached.get(
+            "concepts", []) if isinstance(c, dict))
         lesson_context = f"Lesson: {title}\nOverview: {overview}\nConcepts covered: {concepts}"
 
     from personas import get_persona
@@ -737,7 +750,8 @@ Adapt your tone and depth to the student's profile.
 
         latest = user_messages[-1]["content"]
         history_for_bedrock = [
-            {"role": m["role"], "content": [{"type": "text", "text": m["content"]}]}
+            {"role": m["role"], "content": [
+                {"type": "text", "text": m["content"]}]}
             for m in messages[:-1]
         ]
 
@@ -749,7 +763,8 @@ Adapt your tone and depth to the student's profile.
                 modelId=MODEL_ID,
                 system=[{"text": system_prompt}],
                 messages=history_for_bedrock + [
-                    {"role": "user", "content": [{"type": "text", "text": latest}]}
+                    {"role": "user", "content": [
+                        {"type": "text", "text": latest}]}
                 ],
                 inferenceConfig={"maxTokens": 1024, "temperature": 0.5},
             )
@@ -769,6 +784,92 @@ Adapt your tone and depth to the student's profile.
         yield _sse({"type": "done", "message": reply})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+class InteractiveLessonStartRequest(BaseModel):
+    lesson_id: str
+    persona: str = "charles"
+    course: Optional[str] = None
+
+
+class InteractiveLessonTickRequest(BaseModel):
+    session_id: str
+    message: Optional[str] = None
+    action: Optional[str] = None
+    widget_result: Optional[Dict[str, Any]] = None
+
+
+class InteractiveLessonWidgetRequest(BaseModel):
+    session_id: str
+    widget_type: str
+    payload: Dict[str, Any]
+    note: Optional[str] = None
+
+
+@app.post("/lesson/interactive/start")
+def interactive_lesson_start(req: InteractiveLessonStartRequest) -> dict[str, Any]:
+    """Walk a lesson dynamically using Pinecone + YouTube (same sources as /lesson) and Bedrock checkpoints."""
+    try:
+        from dynamic_lesson import start_session
+
+        return start_session(req.lesson_id, req.persona, req.course)
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/interactive/tick")
+def interactive_lesson_tick(req: InteractiveLessonTickRequest) -> dict[str, Any]:
+    try:
+        from dynamic_lesson import tick_session
+
+        return tick_session(
+            req.session_id,
+            message=req.message,
+            action=req.action,
+            widget_result=req.widget_result,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/lesson/interactive/session/{session_id}")
+def interactive_lesson_session(session_id: str) -> dict[str, Any]:
+    try:
+        from dynamic_lesson import get_session_public
+
+        return get_session_public(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+
+
+@app.post("/lesson/interactive/widget")
+def interactive_lesson_enqueue_widget(req: InteractiveLessonWidgetRequest) -> dict[str, Any]:
+    """
+    Attach an MCQ / flashcard / free-response block (same shape the model returns in pending_widget).
+    Lets a tool-calling layer or tests push UI without going through a reflection tick.
+    """
+    try:
+        from dynamic_lesson import enqueue_widget
+
+        return enqueue_widget(
+            req.session_id,
+            {"type": req.widget_type, "payload": req.payload},
+            note=req.note,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 if __name__ == "__main__":

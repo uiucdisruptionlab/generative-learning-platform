@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import { usePersona } from '../contexts/PersonaContext'
 import { fetchLesson, scoreLessonResponse, streamLessonChat, type LessonContent, type LessonQuestion, type ChatMessage, type LessonScoreResponse } from '../api/lesson'
@@ -216,6 +216,7 @@ export default function LessonPage() {
   const [searchParams] = useSearchParams()
   const { currentPersona } = usePersona()
   const courseOverride = searchParams.get('course') ?? undefined
+  const interactiveHref = `/lesson/${lessonId}/interactive${courseOverride ? `?course=${encodeURIComponent(courseOverride)}` : ''}`
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -315,6 +316,18 @@ export default function LessonPage() {
           </div>
         ) : lesson && (
           <div className="space-y-8">
+            <div className="rounded-xl border border-primary/30 bg-primary/5 dark:bg-primary/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <p className="text-sm text-slate-700 dark:text-slate-200">
+                Prefer a guided walkthrough with checkpoints and quick activities?
+              </p>
+              <Link
+                to={interactiveHref}
+                className="inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-primary hover:underline whitespace-nowrap"
+              >
+                <span className="material-symbols-outlined text-base">route</span>
+                Interactive lesson
+              </Link>
+            </div>
 
             {/* Overview */}
             <div className="rounded-2xl bg-primary/5 dark:bg-primary/10 border-2 border-primary/20 p-5">

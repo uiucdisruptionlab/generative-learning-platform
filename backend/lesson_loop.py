@@ -1,7 +1,8 @@
 """
-Terminal-first lesson loop: ordered concepts → personalized Bedrock blocks → knowledge checks.
+Terminal-first lesson loop (legacy CLI): ordered concepts → Bedrock blocks → scored knowledge checks + SRS.
 
-Runs after the knowledge graph. No streaming, Redis, LangChain, or tool calls (v1).
+For the web app, prefer `dynamic_lesson.py` + `/lesson/interactive/*`, which reuses Pinecone + YouTube
+sources from `lesson_generator` and walks the learner step-by-step without SRS.
 """
 
 from __future__ import annotations
