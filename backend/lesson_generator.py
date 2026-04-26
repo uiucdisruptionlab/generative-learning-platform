@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -7,8 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from bedrock.client import create_bedrock_runtime_client
-from personas import get_persona
 from youtube.client import search_videos
+
+_BACKEND_DIR = Path(__file__).resolve().parent
+_sc_path = _BACKEND_DIR / "supabase" / "supabase_client.py"
+_spec = importlib.util.spec_from_file_location("glp_supabase_client", _sc_path)
+if _spec is None or _spec.loader is None:
+    raise RuntimeError(f"Cannot load supabase client from {_sc_path}")
+_glp_sc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_glp_sc)
+get_student_profile = _glp_sc.get_student_profile
+get_supabase_client = _glp_sc.get_supabase_client
 
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
@@ -17,6 +27,11 @@ COURSE_NAMESPACES: dict[str, str] = {
     "accounting": "15.501_Transcripts",
     "python": "6.0001_Transcripts",
     "financing": "11.437_Transcripts",
+}
+
+# Seeded IDs from backend/supabase/seed_students.sql
+DEMO_PERSONA_TO_STUDENT_ID: dict[str, str] = {
+    "charles": "c0000003-0000-4000-8000-000000000003",
 }
 
 SYSTEM_PROMPT = """
@@ -63,6 +78,7 @@ Output schema:
 
 Rules:
 - Tailor the depth, tone, and structure of every step to the learner profile provided.
+- Personalize examples and analogies to the learner's interests and goals/career direction whenever relevant.
 - Steps should flow logically: start with core concepts, then move to examples, then a summary.
 - Aim for exactly 3 steps.
 - Generate exactly 3 questions. Mix multiple choice and fill in the blank.
@@ -74,6 +90,78 @@ Rules:
 - The "options" field should only appear for multiple_choice questions.
 - Be concise throughout — this is a summary lesson, not a textbook.
 """.strip()
+
+
+def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: str | None) -> dict[str, Any]:
+    llm_profile = profile.get("llm_profile") or {}
+    if not isinstance(llm_profile, dict):
+        llm_profile = {}
+
+    preferred_formats = profile.get("preferred_formats") or []
+    if not isinstance(preferred_formats, list):
+        preferred_formats = [str(preferred_formats)]
+
+    interests = profile.get("interests") or []
+    if not isinstance(interests, list):
+        interests = [str(interests)]
+
+    goals = profile.get("learning_goals") or {}
+    if not isinstance(goals, dict):
+        goals = {"raw": str(goals)}
+
+    course = str(goals.get("course") or goals.get("target_course") or course_fallback or "accounting").lower()
+    if "python" in course:
+        course = "python"
+    elif "financ" in course and "account" not in course:
+        course = "financing"
+    else:
+        course = "accounting"
+
+    learning_style = (
+        str(llm_profile.get("learning_style_summary") or "").strip()
+        or ", ".join(str(x) for x in preferred_formats if str(x).strip())
+        or "guided explanations and practice questions"
+    )
+
+    return {
+        "student_id": str(profile.get("id") or ""),
+        "name": str(profile.get("name") or "Learner"),
+        "major": str(profile.get("major_or_field") or "General Studies"),
+        "course": course,
+        "familiarity": str(llm_profile.get("subject_confidence") or "unknown"),
+        "learning_style": learning_style,
+        "hours_per_week": profile.get("weekly_hours"),
+        "notes": str(llm_profile.get("notes") or ""),
+        "interests": [str(x) for x in interests if str(x).strip()],
+        "learning_goals": goals,
+    }
+
+
+def _resolve_student_id(persona_id: str) -> str:
+    p = (persona_id or "").strip()
+    if not p:
+        raise ValueError("persona is required")
+    # Accept explicit UUID directly.
+    if re.fullmatch(r"[0-9a-fA-F-]{36}", p):
+        return p.lower()
+    sid = DEMO_PERSONA_TO_STUDENT_ID.get(p.lower())
+    if not sid:
+        raise ValueError(
+            f"Unknown persona '{persona_id}'. For now, supported alias is 'charles' or pass a student UUID."
+        )
+    return sid
+
+
+def _load_persona_from_supabase(persona_id: str, *, course_override: str | None) -> dict[str, Any]:
+    student_id = _resolve_student_id(persona_id)
+    supabase = get_supabase_client()
+    profile = get_student_profile(student_id, client=supabase)
+    if not profile:
+        raise RuntimeError(
+            f"No student profile found in Supabase for student_id={student_id!r}. "
+            "Run backend/supabase/seed_students.sql (includes Charles) and retry."
+        )
+    return _normalize_profile_to_persona(profile, course_fallback=course_override)
 
 
 def _vector_metadata(vector: Any) -> dict[str, Any]:
@@ -282,6 +370,8 @@ Major: {persona['major']}
 Familiarity with topic: {persona['familiarity']}
 Learning style: {persona['learning_style']}
 Hours available per week: {persona['hours_per_week']}
+Interests: {json.dumps(persona.get('interests', []), ensure_ascii=False)}
+Learning goals: {json.dumps(persona.get('learning_goals', {}), ensure_ascii=False)}
 Additional notes: {persona['notes']}
 
 SOURCE MATERIAL (raw lecture chunks):
@@ -289,6 +379,10 @@ SOURCE MATERIAL (raw lecture chunks):
 
 AVAILABLE YOUTUBE VIDEOS:
 {videos_text}
+
+Personalization requirement:
+- Keep tutor narration in the learner's language preference (if specified elsewhere), but make
+  examples, scenarios, and analogies explicitly relevant to the learner's interests/goals above.
 
 Generate a personalized lesson following the output schema exactly.
 """.strip()
@@ -316,7 +410,7 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     Same inputs as generate_lesson: roadmap lesson, Pinecone chunks, YouTube search.
     Used by the interactive / dynamic lesson loop without generating the full lesson JSON.
     """
-    persona = get_persona(persona_id)
+    persona = _load_persona_from_supabase(persona_id, course_override=course_override)
     course = course_override or persona.get("course", "accounting")
     lesson = _get_lesson_from_cache(lesson_id, course)
 

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useRef } from 'react'
+import { MouseEvent, useEffect, useRef } from 'react'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 
 const DEFAULT_OUTCOMES: HomeRoadmapOutcome[] = [
@@ -44,6 +44,7 @@ type LearningRoadmapProps = {
   outcomes?: HomeRoadmapOutcome[]
   startHereTo?: string
   viewFullTo?: string
+  onStartHere?: (event: MouseEvent<HTMLAnchorElement>) => void
 }
 
 export default function LearningRoadmap({
@@ -53,6 +54,7 @@ export default function LearningRoadmap({
   outcomes: outcomesProp,
   startHereTo = '/module/income-statement',
   viewFullTo = '/roadmap',
+  onStartHere,
 }: LearningRoadmapProps) {
   const outcomes = outcomesProp ?? DEFAULT_OUTCOMES
   const currentItemRef = useRef<HTMLDivElement | null>(null)
@@ -112,6 +114,7 @@ export default function LearningRoadmap({
               {outcome.status === 'current' && (
                 <Link
                   to={startHereTo}
+                  onClick={onStartHere}
                   className="shrink-0 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-light transition-all shadow-md shadow-primary/20 inline-block"
                 >
                   Start here

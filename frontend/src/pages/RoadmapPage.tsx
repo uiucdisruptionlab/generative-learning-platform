@@ -1,54 +1,86 @@
-import { useState, useEffect } from 'react'
+import { MouseEvent, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
 import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
-import {
-  fetchRoadmap,
-  mapLessonsToOutcomes,
-  ROADMAP_TARGETS,
-  type FrontendRoadmapTarget,
-} from '../api/roadmap'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+import { usePersona } from '../contexts/PersonaContext'
+import { fetchStudentRoadmapData, startSession, type GeneratedRoadmapConcept } from '../api/home'
 
-const COURSE_LABELS: Record<string, { title: string; description: string }> = {
-  accounting: { title: 'Financial Accounting', description: 'Personalized for you' },
-  python: { title: 'Intro to Python', description: 'Personalized for you' },
-  financing: { title: 'Financing Economic Development', description: 'Personalized for you' },
+type RoadmapData = Awaited<ReturnType<typeof fetchStudentRoadmapData>>
+
+function conceptTitle(nodeId: string, concepts: GeneratedRoadmapConcept[] = []): string {
+  const found = concepts.find((concept) => concept.id === nodeId || concept.name === nodeId)
+  return found?.name || found?.id || nodeId
 }
 
-function getCourseKey(target: FrontendRoadmapTarget): string {
-  const course = target.course.toLowerCase()
-  if (course.includes('alec') || course === 'accounting') return 'accounting'
-  if (course === 'python') return 'python'
-  if (course === 'financing') return 'financing'
-  return 'accounting'
+function conceptDescription(nodeId: string, concepts: GeneratedRoadmapConcept[] = []): string | undefined {
+  const found = concepts.find((concept) => concept.id === nodeId || concept.name === nodeId)
+  return found?.description
+}
+
+function makeOutcomes(
+  nodeIds: string[],
+  concepts: GeneratedRoadmapConcept[] | undefined,
+  currentIndex: number,
+): HomeRoadmapOutcome[] {
+  return nodeIds.map((nodeId, index) => ({
+    id: nodeId,
+    title: conceptTitle(nodeId, concepts),
+    status: index < currentIndex ? 'completed' : index === currentIndex ? 'current' : 'upcoming',
+    subtext: conceptDescription(nodeId, concepts),
+  }))
 }
 
 export default function RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [outcomes, setOutcomes] = useState<HomeRoadmapOutcome[] | null>(null)
-  const [target, setTarget] = useState<FrontendRoadmapTarget>(ROADMAP_TARGETS.accounting)
+  const [data, setData] = useState<RoadmapData | null>(null)
   const [selectedPath, setSelectedPath] = useState('/roadmap')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-
-  const courseKey = getCourseKey(target)
-  const courseLabel = COURSE_LABELS[courseKey] ?? COURSE_LABELS.accounting
+  const { studentId } = usePersona()
+  const navigate = useNavigate()
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    setOutcomes(null)
-    fetchRoadmap({ ...target, refine: true })
-      .then((data) => {
-        setOutcomes(mapLessonsToOutcomes(data.lessons))
-        setError(null)
+    setData(null)
+    setError(null)
+    fetchStudentRoadmapData(studentId)
+      .then((next) => {
+        if (!cancelled) setData(next)
       })
-      .catch((err) => setError(String(err)))
-      .finally(() => setLoading(false))
-  }, [target])
+      .catch((err) => {
+        if (!cancelled) setError(String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [studentId])
 
-  const outcomeCount = outcomes ? `${outcomes.length} learning outcomes` : '...'
+  const currentIndex = data?.roadmapPosition.current_index ?? 0
+  const nodeIds = data?.roadmap.node_ids ?? []
+  const outcomes = useMemo(
+    () => makeOutcomes(nodeIds, data?.roadmap.concepts, currentIndex),
+    [nodeIds, data?.roadmap.concepts, currentIndex],
+  )
+  const activeNodeId = nodeIds[Math.min(Math.max(currentIndex, 0), Math.max(nodeIds.length - 1, 0))]
+  const title = data?.student.learning_goals?.target_course || data?.student.learning_goals?.primary_focus || 'Roadmap'
+  const description = `${outcomes.length} learning outcomes · Personalized for you`
+
+  const handleStartHere = async (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    try {
+      const session = await startSession(studentId)
+      navigate(`/lesson?session_id=${encodeURIComponent(session.session_id)}`)
+    } catch (err) {
+      setError(String(err))
+    }
+  }
 
   return (
     <AppLayout
@@ -56,17 +88,10 @@ export default function RoadmapPage() {
       onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       settingsOpen={settingsOpen}
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
-      title={courseLabel.title}
-      description={`${outcomeCount} · ${courseLabel.description}`}
+      title={title}
+      description={description}
       action={<RoadmapCourseSelect variant="header" value={selectedPath} onValueChange={(path) => {
         setSelectedPath(path)
-        if (path === '/roadmap/accounting' || path === '/roadmap') {
-          setTarget(ROADMAP_TARGETS.accounting)
-        } else if (path === '/roadmap/python' || path === '/roadmap/cs101') {
-          setTarget(ROADMAP_TARGETS.python)
-        } else if (path === '/roadmap/financing') {
-          setTarget(ROADMAP_TARGETS.financing)
-        }
       }} />}
     >
       <div className="max-w-[800px] w-full min-w-0 mx-auto px-8 lg:px-12 py-8 lg:py-12">
@@ -82,8 +107,9 @@ export default function RoadmapPage() {
           </div>
         ) : (
           <LearningRoadmap
-            outcomes={outcomes ?? undefined}
-            startHereTo={outcomes && outcomes.length > 0 ? `/lesson/${outcomes[0].id}?course=${courseKey}` : '#'}
+            outcomes={outcomes.length ? outcomes : []}
+            startHereTo={activeNodeId ? `/lesson/${activeNodeId}/interactive` : '#'}
+            onStartHere={handleStartHere}
           />
         )}
 

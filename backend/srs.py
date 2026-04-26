@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 DEFAULT_EASE_FACTOR = 2.5
 MIN_EASE_FACTOR = 1.3
-PASSING_SCORE = 4
+PASSING_SCORE = 3
 
 
 def clamp_quality(score: int | float) -> int:
@@ -73,6 +73,83 @@ def get_srs_record(
     return rows[0] if rows else None
 
 
+def _srs_identity_filter(query: Any, concept_id: str) -> Any:
+    """Prefer the current unique key while keeping legacy node_id rows readable."""
+    return query.or_(f"concept_id.eq.{concept_id},node_id.eq.{concept_id}")
+
+
+def get_roadmap_position(
+    student_id: str,
+    *,
+    course_id: str = "",
+    client: Client,
+) -> dict[str, Any]:
+    query = (
+        client.table("roadmap_position")
+        .select("*")
+        .eq("student_id", student_id)
+    )
+    if course_id:
+        query = query.eq("course_id", course_id)
+    response = query.limit(1).execute()
+    rows = response.data or []
+    if rows:
+        return rows[0]
+
+    insert_row: dict[str, Any] = {"student_id": student_id, "current_index": 0}
+    if course_id:
+        insert_row["course_id"] = course_id
+    conflict_cols = "student_id,course_id" if course_id else "student_id"
+    # Use upsert so concurrent requests don't race to INSERT the same row.
+    # On conflict keep the existing current_index intact (update nothing).
+    upserted = (
+        client.table("roadmap_position")
+        .upsert(insert_row, on_conflict=conflict_cols, ignore_duplicates=True)
+        .execute()
+    )
+    data = upserted.data or []
+    if data:
+        return data[0]
+    # ON CONFLICT DO NOTHING returns empty data — re-fetch the existing row.
+    refetch = (
+        client.table("roadmap_position")
+        .select("*")
+        .eq("student_id", student_id)
+    )
+    if course_id:
+        refetch = refetch.eq("course_id", course_id)
+    refetch_rows = (refetch.limit(1).execute().data or [])
+    if refetch_rows:
+        return refetch_rows[0]
+    raise RuntimeError("get_roadmap_position: no row returned from Supabase")
+
+
+def set_roadmap_position(
+    student_id: str,
+    current_index: int,
+    *,
+    course_id: str = "",
+    client: Client,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "student_id": student_id,
+        "current_index": max(0, int(current_index)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if course_id:
+        row["course_id"] = course_id
+    on_conflict = "student_id,course_id" if course_id else "student_id"
+    response = (
+        client.table("roadmap_position")
+        .upsert(row, on_conflict=on_conflict)
+        .execute()
+    )
+    data = response.data or []
+    if not data:
+        raise RuntimeError("set_roadmap_position: no row returned from Supabase")
+    return data[0]
+
+
 def upsert_srs_record(
     *,
     student_id: str,
@@ -83,30 +160,49 @@ def upsert_srs_record(
     metadata: dict[str, Any] | None,
     client: Client,
 ) -> dict[str, Any]:
+    _ = (course, metadata)
     concept_id = concept_id or node_id
     if not concept_id:
         raise ValueError("concept_id is required")
 
     previous = get_srs_record(student_id, concept_id, client=client)
     schedule = run_sm2(score, previous)
+    previous_attempts = int((previous or {}).get("attempts") or (previous or {}).get("repetitions") or 0)
+    reviewed_at = schedule["last_reviewed_at"]
 
     row = {
         "student_id": student_id,
         "concept_id": concept_id,
         "node_id": concept_id,
         "score": schedule["quality"],
+        "last_score": schedule["quality"],
         "ease_factor": schedule["ease_factor"],
         "interval_days": schedule["interval_days"],
         "repetitions": schedule["repetitions"],
+        "attempts": previous_attempts + 1,
+        "last_reviewed_at": reviewed_at,
         "next_review_at": schedule["next_review_at"],
     }
     row = {key: value for key, value in row.items() if value is not None}
 
-    response = (
-        client.table("srs_records")
-        .upsert(row, on_conflict="student_id,concept_id")
-        .execute()
-    )
+    try:
+        response = (
+            client.table("srs_records")
+            .upsert(row, on_conflict="student_id,concept_id")
+            .execute()
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Older local Supabase schemas may not have the architecture columns yet.
+        legacy_row = {
+            key: value
+            for key, value in row.items()
+            if key not in {"last_score", "attempts", "last_reviewed_at"}
+        }
+        response = (
+            client.table("srs_records")
+            .upsert(legacy_row, on_conflict="student_id,concept_id")
+            .execute()
+        )
     data = response.data or []
     if not data:
         raise RuntimeError("upsert_srs_record: no row returned from Supabase")
@@ -128,6 +224,52 @@ def get_due_srs_records(
         .execute()
     )
     return list(response.data or [])
+
+
+def get_upcoming_srs_records(
+    student_id: str,
+    *,
+    days: int = 7,
+    client: Client,
+) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    end = now + timedelta(days=max(0, int(days)))
+    response = (
+        client.table("srs_records")
+        .select("*")
+        .eq("student_id", student_id)
+        .gte("next_review_at", now.isoformat())
+        .lte("next_review_at", end.isoformat())
+        .order("next_review_at")
+        .execute()
+    )
+    return list(response.data or [])
+
+
+def advance_roadmap_index(
+    *,
+    student_id: str,
+    node_ids: list[str],
+    current_node_id: str,
+    course_id: str = "",
+    client: Client,
+) -> dict[str, Any]:
+    position = get_roadmap_position(student_id, course_id=course_id, client=client)
+    current_index = int(position.get("current_index") or 0)
+    if current_index < len(node_ids) and node_ids[current_index] == current_node_id:
+        next_index = current_index + 1
+    else:
+        try:
+            next_index = node_ids.index(current_node_id) + 1
+        except ValueError:
+            next_index = current_index
+
+    updated = set_roadmap_position(student_id, next_index, course_id=course_id, client=client)
+    return {
+        "current_index": updated.get("current_index", next_index),
+        "complete": next_index >= len(node_ids),
+        "total": len(node_ids),
+    }
 
 
 def advance_roadmap_progress(

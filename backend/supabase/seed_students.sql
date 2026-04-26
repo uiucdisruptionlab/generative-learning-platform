@@ -67,22 +67,35 @@ insert into students (
   'Accounting',
   '{
     "primary_focus": "Financial and managerial accounting foundations",
+    "career_goal": "Become a CPA and work in corporate financial reporting",
+    "industry_interest": "Technology and startup finance",
     "coding_experience": "not_primary"
   }'::jsonb,
   '[
     "financial accounting",
     "managerial accounting",
+    "CPA exam prep",
+    "financial reporting",
+    "audit workflows",
     "business",
     "finance"
   ]'::jsonb,
   10,
   '["flashcards", "practice questions"]'::jsonb,
   '{
-    "learning_style_summary": "Prefers retrieval practice via flashcards and targeted practice questions.",
+    "learning_style_summary": "Prefers retrieval practice via flashcards and targeted practice questions, especially applied to real corporate reporting scenarios.",
     "subject_confidence": "somewhat_familiar",
-    "notes": "Building foundations in financial and managerial accounting through active recall."
+    "notes": "Building foundations in financial and managerial accounting through active recall with examples tied to CPA-style tasks and corporate finance workflows."
   }'::jsonb
 )
-on conflict (id) do nothing;
+on conflict (id) do update set
+  name = excluded.name,
+  academic_level = excluded.academic_level,
+  major_or_field = excluded.major_or_field,
+  learning_goals = excluded.learning_goals,
+  interests = excluded.interests,
+  weekly_hours = excluded.weekly_hours,
+  preferred_formats = excluded.preferred_formats,
+  llm_profile = excluded.llm_profile;
 
 -- SRS sample rows: backend/supabase/seed_students_srs.sql (run after this file).

@@ -4,6 +4,7 @@ import AppLayout from '../components/AppLayout'
 import { usePersona } from '../contexts/PersonaContext'
 import {
   startInteractiveLesson,
+  continueInteractiveSession,
   tickInteractiveLesson,
   type InteractiveSessionState,
   type InteractiveTranscriptEntry,
@@ -53,7 +54,14 @@ function McqWidget({
   const finish = () => {
     if (idx === null || sent || disabled) return
     setSent(true)
-    onSubmit({ selected_index: idx, correct_index: correct, correct: idx === correct })
+    onSubmit({
+      selected_index: idx,
+      selected_option: opts[idx] ?? '',
+      correct_index: correct,
+      correct_option: opts[correct] ?? '',
+      correct: idx === correct,
+      question: payload.question,
+    })
   }
 
   return (
@@ -504,6 +512,7 @@ export default function InteractiveLessonPage() {
   const { lessonId } = useParams<{ lessonId: string }>()
   const [searchParams] = useSearchParams()
   const courseOverride = searchParams.get('course') ?? undefined
+  const sessionOverride = searchParams.get('session_id') ?? undefined
   const { currentPersona } = usePersona()
   const persona = currentPersona === 'demo' ? 'charles' : currentPersona
 
@@ -542,11 +551,14 @@ export default function InteractiveLessonPage() {
   )
 
   useEffect(() => {
-    if (!lessonId) return
+    if (!lessonId && !sessionOverride) return
     let cancelled = false
     setLoading(true)
     setError(null)
-    startInteractiveLesson(lessonId, persona, courseOverride)
+    const load = sessionOverride
+      ? continueInteractiveSession(sessionOverride)
+      : startInteractiveLesson(lessonId, persona, courseOverride)
+    load
       .then((s) => {
         if (!cancelled) setState({ ...s, pending_widget: normalizePendingWidget(s.pending_widget) })
       })
@@ -559,7 +571,7 @@ export default function InteractiveLessonPage() {
     return () => {
       cancelled = true
     }
-  }, [lessonId, persona, courseOverride])
+  }, [lessonId, persona, courseOverride, sessionOverride])
 
   const pending = state ? normalizePendingWidget(state.pending_widget as unknown) : null
 
@@ -725,26 +737,24 @@ export default function InteractiveLessonPage() {
                   Checkpoint
                 </p>
                 <p className="text-xs text-slate-600 dark:text-slate-400">
-                  When you&apos;re ready, continue to the next part of the lesson.
+                  Respond naturally: say you&apos;re ready to continue, ask for clarification, or say you&apos;re done.
                 </p>
-                <div className="flex flex-wrap gap-3 items-center pt-1">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  rows={2}
+                  disabled={busy}
+                  placeholder="e.g., “continue”, “can you explain that again?”, or “i'm done for now”"
+                  className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-3 text-sm focus:border-primary focus:outline-none disabled:opacity-50"
+                />
                 <button
                   type="button"
-                  disabled={busy}
-                  onClick={() => runTick({ action: 'confirm_yes' })}
-                  className="px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold hover:bg-primary-light disabled:opacity-40"
+                  disabled={busy || !draft.trim()}
+                  onClick={() => runTick({ message: draft })}
+                  className="px-5 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-40"
                 >
-                  Yes — let’s continue
+                  Send
                 </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => runTick({ action: 'confirm_not_yet', message: draft || 'I need a bit more help first.' })}
-                  className="px-5 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-600 text-sm disabled:opacity-40"
-                >
-                  Not quite yet
-                </button>
-                </div>
               </section>
             )}
 
@@ -779,7 +789,7 @@ export default function InteractiveLessonPage() {
             {state.awaiting === 'none' && (
               <p className="text-sm text-slate-600 dark:text-slate-400">
                 You&apos;re at the end of this walkthrough. Reopen from the roadmap to run it again, or switch to the{' '}
-                <Link className="text-primary underline" to={`/lesson/${lessonId}?course=${courseOverride ?? ''}`}>
+                <Link className="text-primary underline" to={lessonId ? `/lesson/${lessonId}?course=${courseOverride ?? ''}` : '/roadmap'}>
                   generated lesson
                 </Link>
                 .

@@ -21,7 +21,9 @@ interface LearnerProfileCardProps {
 
 const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit }) => {
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return 'Not available';
+    return date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric'

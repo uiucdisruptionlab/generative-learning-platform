@@ -88,6 +88,109 @@ STEP_TYPES: list[tuple[str, str]] = [
     ("summary", "Recap what matters and how it connects to the lesson title."),
 ]
 
+# Natural-language intent hints for checkpoint handling.
+_EXIT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\b(i\s*(am|'?m)\s*done)\b",
+        r"\b(done for now)\b",
+        r"\b(let'?s stop)\b",
+        r"\b(stop (the )?lesson)\b",
+        r"\b(exit|quit|end)\b",
+        r"\b(that'?s all)\b",
+        r"\b(no more)\b",
+        r"\b(i have to go)\b",
+        r"\bwe('?re| are) done\b",
+    ]
+]
+
+_CONTINUE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\b(continue|go on|move on|next)\b",
+        r"\b(i'?m ready)\b",
+        r"\b(yes|yep|yeah)\b",
+        r"\b(let'?s go)\b",
+        r"\b(ok|okay|got it|makes sense)\b",
+    ]
+]
+
+CheckpointIntent = Literal["continue", "need_help", "request_activity", "exit", "unknown"]
+
+
+def _requested_activity_type(text: str) -> Literal["mcq", "flashcards", "free_response", "video"] | None:
+    t = (text or "").lower()
+    if not t.strip():
+        return None
+    if any(k in t for k in ("flashcard", "flash card", "cards", "card")):
+        return "flashcards"
+    if any(k in t for k in ("mcq", "multiple choice", "quiz question", "quiz me")):
+        return "mcq"
+    if any(k in t for k in ("video", "youtube", "clip", "watch")):
+        return "video"
+    if any(k in t for k in ("open question", "free response", "short answer")):
+        return "free_response"
+    return None
+
+
+def _classify_checkpoint_intent_llm(
+    session: dict[str, Any],
+    *,
+    stage: str,
+    learner_message: str,
+) -> tuple[CheckpointIntent, Literal["mcq", "flashcards", "free_response", "video"] | None]:
+    """
+    Use the model to classify natural-language checkpoint intent.
+    This avoids brittle keyword-only routing (e.g. "ok" should usually mean continue).
+    """
+    lesson = session["sources"]["lesson"]
+    last_block = session.get("last_step_block") or {}
+    last_activity = session.get("last_activity")
+    dialogue = _recent_transcript_for_context(session, max_chars=1600)
+
+    system = """You classify learner intent at a lesson checkpoint.
+Return JSON only.
+Schema:
+{
+  "intent": "continue" | "need_help" | "request_activity" | "exit" | "unknown",
+  "activity_type": "mcq" | "flashcards" | "free_response" | "video" | null
+}
+
+Rules:
+- "continue": learner is ready to move on (examples: "ok", "okay", "got it", "next", "continue", "sounds good", "makes sense").
+- "need_help": learner asks for clarification, repeat, or has a question.
+- "request_activity": learner explicitly asks for another activity (mcq/flashcard/video/free response).
+- "exit": learner wants to stop/end for now.
+- "unknown": unclear.
+- Set activity_type only when intent=request_activity."""
+    user = f"""STAGE: {stage}
+LESSON_TITLE: {lesson.get("title")}
+LAST_SEGMENT_TITLE: {last_block.get("title")}
+LAST_ACTIVITY_RESULT: {json.dumps(last_activity, ensure_ascii=False)}
+RECENT_CONVERSATION: {dialogue if dialogue.strip() else "[n/a]"}
+LEARNER_MESSAGE: {learner_message}
+Return JSON only."""
+    try:
+        raw = _call_converse(system, user, temperature=0, max_tokens=220)
+        parsed = _parse_json_object(raw)
+        intent_raw = str(parsed.get("intent") or "unknown").lower()
+        intent: CheckpointIntent
+        if intent_raw in {"continue", "need_help", "request_activity", "exit", "unknown"}:
+            intent = intent_raw  # type: ignore[assignment]
+        else:
+            intent = "unknown"
+
+        at_raw = parsed.get("activity_type")
+        activity_type: Literal["mcq", "flashcards", "free_response", "video"] | None = None
+        if isinstance(at_raw, str):
+            at = at_raw.lower().strip()
+            if at in {"mcq", "flashcards", "free_response", "video"}:
+                activity_type = at  # type: ignore[assignment]
+
+        return intent, activity_type
+    except Exception:
+        return "unknown", None
+
 # One user turn after overview, then per teaching step: teach (LLM) → reflect → optional widget → confirm.
 # "Engage" (follow-up + widget choice) runs inline when the learner submits their reflection.
 STAGES: list[str] = ["after_overview_confirm"] + sum(
@@ -419,6 +522,8 @@ def _persona_block(persona: dict[str, Any]) -> str:
             "familiarity": persona.get("familiarity"),
             "learning_style": persona.get("learning_style"),
             "hours_per_week": persona.get("hours_per_week"),
+            "interests": persona.get("interests"),
+            "learning_goals": persona.get("learning_goals"),
             "notes": persona.get("notes"),
         },
         ensure_ascii=False,
@@ -455,7 +560,8 @@ Schema:
 {_LLM_NEVER_INFRA}
 
 Write a warm 2–4 sentence overview of the lesson: why it matters and what you will explore together.
-Use ideas supported by the source excerpts when present; otherwise use the listed concepts. Do not invent policies."""
+Use ideas supported by the source excerpts when present; otherwise use the listed concepts. Do not invent policies.
+Personalize examples and framing to the learner's interests/goals in LEARNER when relevant."""
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
 
@@ -491,7 +597,8 @@ Schema:
 {_LLM_NEVER_INFRA}
 
 This segment is the "{step_type}" portion: {hint}
-Stay faithful to the excerpts when present; otherwise ground content in CONCEPTS. Do not invent facts."""
+Stay faithful to the excerpts when present; otherwise ground content in CONCEPTS. Do not invent facts.
+Explicitly tailor examples to LEARNER interests/goals whenever possible."""
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
 
@@ -529,17 +636,17 @@ def _resolve_video_widget_payload(
     """
     from youtube.client import search_videos
 
-    url_in = str(raw.get("url") or "").strip()
-    if url_in and ("youtube.com/" in url_in or "youtu.be/" in url_in):
-        return {
-            "title": str(raw.get("title") or "Suggested video"),
-            "url": url_in,
-            "channel": str(raw.get("channel") or ""),
-            "thumbnail": str(raw.get("thumbnail") or ""),
-            "reason": str(raw.get("reason") or raw.get("caption") or "Video you asked for."),
-            "source": "model_url",
-        }
+    def _video_score(focus: str, item: dict[str, Any]) -> float:
+        corpus = " ".join(
+            [
+                str(item.get("title") or ""),
+                str(item.get("description") or ""),
+                str(item.get("channel") or ""),
+            ]
+        )
+        return _relevance_score(focus, corpus)
 
+    url_in = str(raw.get("url") or "").strip()
     q = str(raw.get("search_query") or raw.get("query") or "").strip()
     if not q:
         q = (context_focus or "").strip()
@@ -548,9 +655,34 @@ def _resolve_video_widget_payload(
 
     results: list[dict[str, Any]] = []
     try:
-        results = search_videos(q, max_results=1)
+        results = search_videos(q, max_results=5)
     except Exception as exc:
         print(f"[dynamic_lesson] YouTube search for video widget failed: {exc}")
+
+    if results:
+        results = sorted(results, key=lambda v: _video_score(q, v), reverse=True)
+        v = results[0]
+        return {
+            "title": v.get("title", ""),
+            "url": v.get("url", ""),
+            "channel": v.get("channel", ""),
+            "thumbnail": v.get("thumbnail", ""),
+            "reason": str(raw.get("caption") or raw.get("reason") or f"Suggested for: {q}")[:400],
+            "source": "youtube_search",
+            "search_query_used": q,
+        }
+
+    # Fallback only when search returns nothing: allow direct model URL if present.
+    if url_in and ("youtube.com/" in url_in or "youtu.be/" in url_in):
+        return {
+            "title": str(raw.get("title") or "Suggested video"),
+            "url": url_in,
+            "channel": str(raw.get("channel") or ""),
+            "thumbnail": str(raw.get("thumbnail") or ""),
+            "reason": str(raw.get("reason") or raw.get("caption") or "Video you asked for."),
+            "source": "model_url_fallback",
+            "search_query_attempted": q,
+        }
 
     if not results:
         return {
@@ -566,15 +698,14 @@ def _resolve_video_widget_payload(
             "search_query_attempted": q,
         }
 
-    v = results[0]
     return {
-        "title": v.get("title", ""),
-        "url": v.get("url", ""),
-        "channel": v.get("channel", ""),
-        "thumbnail": v.get("thumbnail", ""),
-        "reason": str(raw.get("caption") or raw.get("reason") or f"Suggested for: {q}")[:400],
-        "source": "youtube_search",
-        "search_query_used": q,
+        "title": "",
+        "url": "",
+        "channel": "",
+        "thumbnail": "",
+        "reason": str(raw.get("caption") or "Could not load a relevant video."),
+        "source": "search_failed",
+        "search_query_attempted": q,
     }
 
 
@@ -582,6 +713,7 @@ def _run_engage_llm(session: dict[str, Any], step_index: int, reflection: str) -
     lesson = session["sources"]["lesson"]
     persona = session["sources"]["persona"]
     last_block = session.get("last_step_block") or {}
+    last_activity = session.get("last_activity")
     engage_chunks = _contextual_source_chunks(session, kind="engage", reflection=reflection)
     dialogue = _recent_transcript_for_context(session)
     system = """You are an expert tutor. Return valid JSON only. No markdown fences.
@@ -606,9 +738,14 @@ IMPORTANT: If the learner asks to watch a video, see a clip, or wants something 
 Ground your search_query in what you just taught and what they asked — do not use generic course titles alone.
 The backend will run a real YouTube search merged with session context (or open your url). Do not invent watch URLs unless you are certain they exist.
 
+Grounding rule:
+- Only say "correct"/"incorrect" if LAST_ACTIVITY_RESULT explicitly contains correctness evidence.
+- If evidence is missing, avoid certainty and ask a clarifying question.
+
 SOURCE EXCERPTS below are retrieved for THIS moment (last segment + their message). Use them to stay on-topic.
 
-Pick mcq or flashcards when a quick check helps; use video when they want audiovisual material; use free_response for open reflection; use none if the learner already showed strong understanding."""
+Pick mcq or flashcards when a quick check helps; use video when they want audiovisual material; use free_response for open reflection; use none if the learner already showed strong understanding.
+Keep assistant wording and examples aligned with LEARNER interests/goals; avoid generic examples when profile gives specifics."""
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
 LEARNER: {_persona_block(persona)}
@@ -621,6 +758,9 @@ RECENT CONVERSATION:
 
 SOURCE EXCERPTS (ranked for this checkpoint — tie your response to these ideas when relevant):
 {_bundle_sources(engage_chunks)}
+
+LAST_ACTIVITY_RESULT (may be null):
+{json.dumps(last_activity, ensure_ascii=False)}
 
 LEARNER REFLECTION / QUESTION:
 {reflection}
@@ -679,6 +819,7 @@ def _run_checkpoint_help_llm(
     lesson = session["sources"]["lesson"]
     persona = session["sources"]["persona"]
     last_block = session.get("last_step_block") or {}
+    last_activity = session.get("last_activity")
     dialogue = _recent_transcript_for_context(session, max_chars=2200)
 
     step_i = _current_step_index(stage)
@@ -702,7 +843,10 @@ Behavior requirements:
 - Then clarify the key idea briefly (2-4 short sentences).
 - Do NOT output a brand-new lesson block with headings.
 - End with one gentle checkpoint question like "Does this make more sense?".
-- Keep tone conversational and encouraging."""
+- Keep tone conversational and encouraging.
+- IMPORTANT: Only claim an answer is "correct" or "incorrect" if LAST_ACTIVITY_RESULT has explicit evidence.
+  Otherwise, avoid certainty and ask a clarifying question.
+- Use LEARNER interests/goals to anchor explanations when you re-explain."""
     user = f"""LESSON: {lesson.get("title")}
 LEARNER: {_persona_block(persona)}
 
@@ -714,6 +858,9 @@ RECENT CONVERSATION:
 
 SOURCE EXCERPTS (selected for this clarification):
 {_bundle_sources(chunks)}
+
+LAST_ACTIVITY_RESULT (may be null):
+{json.dumps(last_activity, ensure_ascii=False)}
 
 LEARNER MESSAGE AT CHECKPOINT:
 {learner_message}
@@ -729,6 +876,148 @@ Return JSON only."""
         "focus on the key relationship we just covered and how it applies in the example. "
         "Does this make more sense?"
     )
+
+
+def _is_exit_intent(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    return any(p.search(t) for p in _EXIT_PATTERNS)
+
+
+def _is_continue_intent(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    return any(p.search(t) for p in _CONTINUE_PATTERNS)
+
+
+def _run_exit_summary_llm(session: dict[str, Any], learner_message: str) -> str:
+    """
+    Summarize progress and end warmly when learner opts out mid-lesson.
+    """
+    lesson = session["sources"]["lesson"]
+    persona = session["sources"]["persona"]
+    summaries = session.get("step_summaries", [])
+    chunks = _contextual_source_chunks(session, kind="closing")
+    dialogue = _recent_transcript_for_context(session, max_chars=2200)
+
+    system = """You are a supportive AI tutor. Return valid JSON only.
+Schema: {"assistant_message":"string"}
+
+The learner explicitly wants to stop now.
+- Acknowledge their message in one short sentence.
+- Give a compact recap (2-4 bullets or sentences) of what was covered so far.
+- End with a warm goodbye and invite them to return later.
+- Do not ask them to continue right now."""
+    user = f"""LESSON: {lesson.get("title")}
+LEARNER: {_persona_block(persona)}
+LEARNER EXIT MESSAGE: {learner_message}
+
+COMPLETED SEGMENTS SO FAR:
+{json.dumps(summaries, ensure_ascii=False)}
+
+RECENT CONVERSATION:
+{dialogue if dialogue.strip() else "[n/a]"}
+
+SOURCE EXCERPTS (for accurate recap):
+{_bundle_sources(chunks)}
+
+Return JSON only."""
+    try:
+        raw = _call_converse(system, user, temperature=0.3, max_tokens=700)
+        data = _parse_json_object(raw)
+        out = str(data.get("assistant_message") or "").strip()
+        if out:
+            return out
+    except Exception:
+        pass
+    return (
+        "Absolutely — we can stop here. Quick recap: we covered the core concept, "
+        "walked through an example, and checked your understanding with interactive prompts. "
+        "Great work today, and feel free to come back anytime to continue."
+    )
+
+
+def _run_forced_activity_llm(
+    session: dict[str, Any],
+    *,
+    step_index: int,
+    learner_message: str,
+    activity_type: Literal["mcq", "flashcards", "free_response", "video"],
+) -> tuple[str, dict[str, Any]]:
+    """
+    Generate a requested activity from a confirm checkpoint, e.g.:
+    "give me another flashcard" right after prior activity.
+    """
+    lesson = session["sources"]["lesson"]
+    persona = session["sources"]["persona"]
+    last_block = session.get("last_step_block") or {}
+    dialogue = _recent_transcript_for_context(session, max_chars=2200)
+    chunks = _contextual_source_chunks(
+        session, kind="engage", step_index=step_index, reflection=learner_message
+    )
+
+    payload_schema = {
+        "mcq": '{"question":"string","options":["4 strings"],"correct_index":0,"explanation":"string"}',
+        "flashcards": '{"concepts":[{"name":"string","description":"string"}],"cards":[{"front":"string","back":"string"}]}',
+        "free_response": '{"question":"string"}',
+        "video": '{"search_query":"string","caption":"string","url":"optional YouTube URL"}',
+    }[activity_type]
+
+    system = f"""You are an expert tutor. Return valid JSON only.
+Schema:
+{{
+  "assistant_message": "string (brief acknowledgment in conversational tone)",
+  "payload": {payload_schema}
+}}
+
+The learner explicitly requested an additional activity of type "{activity_type}".
+Generate one high-quality activity grounded in recent lesson context."""
+    user = f"""LESSON: {lesson.get("title")}
+CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
+LEARNER: {_persona_block(persona)}
+
+LAST TEACHING SEGMENT TITLE: {last_block.get("title")}
+LAST TEACHING SEGMENT (excerpt): {(last_block.get("content") or "")[:1200]}
+
+RECENT CONVERSATION:
+{dialogue if dialogue.strip() else "[n/a]"}
+
+SOURCE EXCERPTS (selected for this follow-up activity):
+{_bundle_sources(chunks)}
+
+LEARNER REQUEST:
+{learner_message}
+
+Return JSON only."""
+    raw = _call_converse(system, user, temperature=0.35, max_tokens=1000)
+    data = _parse_json_object(raw)
+    msg = str(data.get("assistant_message") or "").strip() or "Sure — here is another quick check."
+    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+
+    if activity_type == "mcq":
+        options = payload.get("options")
+        if not isinstance(options, list) or len(options) < 2:
+            options = ["Option A", "Option B", "Option C", "Option D"]
+        payload = {
+            "question": str(payload.get("question") or "Quick check: which option best matches the core idea?"),
+            "options": [str(o) for o in options][:4],
+            "correct_index": int(payload.get("correct_index") or 0),
+            "explanation": str(payload.get("explanation") or "This checks the main concept from the prior step."),
+        }
+    elif activity_type == "flashcards":
+        payload = {
+            "concepts": payload.get("concepts") if isinstance(payload.get("concepts"), list) else [],
+            "cards": payload.get("cards") if isinstance(payload.get("cards"), list) else [],
+        }
+    elif activity_type == "free_response":
+        payload = {"question": str(payload.get("question") or "In your own words, what was the key idea?")}
+    else:  # video
+        vctx = _video_search_context(session, learner_message)
+        payload = _resolve_video_widget_payload(payload, lesson, context_focus=vctx)
+
+    return msg, payload
 
 
 def _append_assistant(session: dict[str, Any], text: str, *, meta: dict[str, Any] | None = None) -> None:
@@ -760,6 +1049,7 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
         "transcript": [],
         "step_summaries": [],
         "last_step_block": None,
+        "last_activity": None,
         "pending_widget": None,
         "created_at": time.time(),
     }
@@ -873,6 +1163,16 @@ def tick_session(
         return _response(session)
 
     stage = STAGES[session["cursor"]]
+    text_msg = (message or "").strip()
+
+    # Allow graceful early exit from any stage that accepts user text.
+    if text_msg and _is_exit_intent(text_msg):
+        _append_user(session, text_msg)
+        bye = _run_exit_summary_llm(session, text_msg)
+        _append_assistant(session, bye, meta={"kind": "closing", "early_exit": True})
+        session["pending_widget"] = None
+        session["cursor"] = _stage_index("complete")
+        return _response(session)
 
     # Optional widget was skipped by the model — don't block the learner on an empty slot.
     if stage.startswith("widget_") and session.get("pending_widget") is None:
@@ -881,12 +1181,61 @@ def tick_session(
 
     if stage.endswith("_user"):
         if stage.startswith("confirm") or stage == "after_overview_confirm":
-            if action == "confirm_yes":
+            handled_confirm = False
+            llm_intent: CheckpointIntent = "unknown"
+            llm_activity: Literal["mcq", "flashcards", "free_response", "video"] | None = None
+            if text_msg:
+                llm_intent, llm_activity = _classify_checkpoint_intent_llm(
+                    session,
+                    stage=stage,
+                    learner_message=text_msg,
+                )
+            if text_msg and llm_intent == "exit":
+                _append_user(session, text_msg)
+                bye = _run_exit_summary_llm(session, text_msg)
+                _append_assistant(session, bye, meta={"kind": "closing", "early_exit": True})
+                session["pending_widget"] = None
+                session["cursor"] = _stage_index("complete")
+                handled_confirm = True
+
+            requested = llm_activity or _requested_activity_type(text_msg)
+            step_i = _current_step_index(stage)
+            if (
+                requested
+                and step_i is not None
+                and stage.startswith("confirm_step")
+                and llm_intent in {"request_activity", "unknown"}
+            ):
+                _append_user(session, text_msg)
+                msg, payload = _run_forced_activity_llm(
+                    session,
+                    step_index=step_i,
+                    learner_message=text_msg,
+                    activity_type=requested,
+                )
+                _append_assistant(
+                    session,
+                    msg,
+                    meta={"kind": "engage", "step_index": step_i, "forced_activity": requested},
+                )
+                session["pending_widget"] = {"type": requested, "payload": payload}
+                session["cursor"] = _stage_index(f"widget_step{step_i}_user")
+                handled_confirm = True
+
+            if not handled_confirm and (
+                action == "confirm_yes"
+                or llm_intent == "continue"
+                or (llm_intent == "unknown" and _is_continue_intent(text_msg))
+            ):
                 _append_user(session, "[Learner: ready to continue]")
                 session["cursor"] += 1
                 session["pending_widget"] = None
-            elif action == "confirm_not_yet" or (message or "").strip():
-                learner_msg = (message or "").strip() or "I need more help before moving on."
+            elif not handled_confirm and (
+                action == "confirm_not_yet"
+                or llm_intent == "need_help"
+                or (llm_intent == "unknown" and bool(text_msg))
+            ):
+                learner_msg = text_msg or "I need more help before moving on."
                 _append_user(session, learner_msg)
                 helper = _run_checkpoint_help_llm(
                     session,
@@ -899,19 +1248,21 @@ def tick_session(
                     meta={"kind": "engage", "checkpoint_help": True},
                 )
                 session["pending_widget"] = None
-            else:
-                raise ValueError("Send action=confirm_yes, or a message explaining what is unclear.")
+            elif not handled_confirm:
+                raise ValueError(
+                    "Send a checkpoint message (e.g. 'continue', a question, or 'I'm done')."
+                )
 
         elif stage.startswith("reflect_"):
-            if not (message or "").strip():
+            if not text_msg:
                 raise ValueError("Reflection text is required for this stage.")
             step_i = _current_step_index(stage)
             if step_i is None:
                 raise ValueError("Invalid stage")
-            _append_user(session, (message or "").strip())
+            _append_user(session, text_msg)
             session["cursor"] += 1
 
-            engage = _run_engage_llm(session, step_i, (message or "").strip())
+            engage = _run_engage_llm(session, step_i, text_msg)
             _append_assistant(
                 session,
                 engage["assistant_message"],
@@ -927,6 +1278,7 @@ def tick_session(
                 session["cursor"] = _stage_index(f"widget_step{step_i}_user")
 
         elif stage.startswith("widget_"):
+            pending_before = session.get("pending_widget")
             if (
                 session.get("pending_widget") is not None
                 and widget_result is None
@@ -939,6 +1291,12 @@ def tick_session(
                 :2000
             ]
             _append_user(session, f"[Completed activity: {summary}]")
+            if isinstance(pending_before, dict):
+                session["last_activity"] = {
+                    "type": pending_before.get("type"),
+                    "payload": pending_before.get("payload"),
+                    "result": widget_result or {"skipped": action == "confirm_yes"},
+                }
             session["pending_widget"] = None
             session["cursor"] += 1
 

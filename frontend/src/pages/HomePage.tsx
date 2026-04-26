@@ -1,186 +1,205 @@
-import { useState } from 'react'
+import { MouseEvent, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
-import { HOME_ROADMAP_PREVIEW } from '../data/homeRoadmapPreview'
+import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 import { usePersona } from '../contexts/PersonaContext'
+import {
+  fetchHomeData,
+  startSession,
+  type DueSrsRecord,
+  type GeneratedRoadmapConcept,
+  type StudentProfile,
+} from '../api/home'
+
+type RecommendationCard = {
+  icon: string
+  badge: string
+  badgeColor: string
+  iconColor: string
+  borderColor: string
+  title: string
+  meta: string
+}
+
+type HomeData = Awaited<ReturnType<typeof fetchHomeData>>
+
+function conceptTitle(nodeId: string, concepts: GeneratedRoadmapConcept[] = []): string {
+  const found = concepts.find((concept) => concept.id === nodeId || concept.name === nodeId)
+  return found?.name || found?.id || nodeId
+}
+
+function studentSubtitle(student: StudentProfile): string {
+  return (
+    student.llm_profile?.notes ||
+    student.learning_goals?.target_course ||
+    student.learning_goals?.primary_focus ||
+    student.major_or_field ||
+    ''
+  )
+}
+
+function formatConfig(format: string): Omit<RecommendationCard, 'title'> {
+  const lower = format.toLowerCase()
+  if (lower.includes('video')) {
+    return {
+      icon: 'play_circle',
+      badge: 'Video Lesson',
+      badgeColor: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
+      iconColor: 'bg-red-50 dark:bg-red-900/30 text-red-600 group-hover:bg-red-600',
+      borderColor: 'border-red-200/70 dark:border-red-700/40 hover:border-red-500/60',
+      meta: 'Personalized video',
+    }
+  }
+  if (lower.includes('hands') || lower.includes('practice') || lower.includes('problem') || lower.includes('exercise')) {
+    return {
+      icon: 'code',
+      badge: 'Hands-On',
+      badgeColor: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
+      iconColor: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 group-hover:bg-indigo-600',
+      borderColor: 'border-indigo-200/70 dark:border-indigo-700/40 hover:border-indigo-500/60',
+      meta: 'Practice activity',
+    }
+  }
+  if (lower.includes('flash')) {
+    return {
+      icon: 'style',
+      badge: 'Flashcards',
+      badgeColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary',
+      iconColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary group-hover:bg-primary',
+      borderColor: 'border-emerald-200/70 dark:border-emerald-700/40 hover:border-primary/60',
+      meta: 'Review cards',
+    }
+  }
+  if (lower.includes('quiz') || lower.includes('question')) {
+    return {
+      icon: 'quiz',
+      badge: 'Quick Quiz',
+      badgeColor: 'bg-orange-50 dark:bg-orange-900/30 text-accent',
+      iconColor: 'bg-orange-50 dark:bg-orange-900/30 text-accent group-hover:bg-accent',
+      borderColor: 'border-orange-200/70 dark:border-orange-700/40 hover:border-accent/60',
+      meta: 'Knowledge check',
+    }
+  }
+  if (lower.includes('ai') || lower.includes('discussion')) {
+    return {
+      icon: 'forum',
+      badge: 'AI Discussion',
+      badgeColor: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400',
+      iconColor: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 group-hover:bg-purple-600',
+      borderColor: 'border-purple-200/70 dark:border-purple-700/40 hover:border-purple-500/60',
+      meta: 'Interactive chat',
+    }
+  }
+  return {
+    icon: 'auto_stories',
+    badge: format || 'Reading',
+    badgeColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary',
+    iconColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary group-hover:bg-secondary',
+    borderColor: 'border-amber-200/70 dark:border-amber-700/40 hover:border-secondary/60',
+    meta: 'Study material',
+  }
+}
+
+function makeRecommendations(student: StudentProfile, activeConcept: string): RecommendationCard[] {
+  const formats = student.preferred_formats?.length ? student.preferred_formats : []
+  return formats.slice(0, 3).map((format) => {
+    const config = formatConfig(format)
+    return {
+      ...config,
+      title: `${config.badge}: ${activeConcept}`,
+    }
+  })
+}
+
+function makeRoadmapOutcomes(
+  nodeIds: string[],
+  concepts: GeneratedRoadmapConcept[] | undefined,
+  currentIndex: number,
+): HomeRoadmapOutcome[] {
+  const start = Math.max(0, currentIndex - 1)
+  const end = Math.min(nodeIds.length, currentIndex + 2)
+  return nodeIds.slice(start, end).map((nodeId, offset) => {
+    const index = start + offset
+    return {
+      id: nodeId,
+      title: conceptTitle(nodeId, concepts),
+      status: index < currentIndex ? 'completed' : index === currentIndex ? 'current' : 'upcoming',
+      subtext: index === currentIndex ? 'Based on your progress, this is the right place to start.' : undefined,
+    }
+  })
+}
+
+function formatMonth(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+}
+
+function formatDueText(value?: string): string {
+  if (!value) return 'Review scheduled'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Review scheduled'
+  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+}
 
 export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const { currentPersona, persona } = usePersona()
+  const { persona, studentId } = usePersona()
+  const [homeData, setHomeData] = useState<HomeData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate()
 
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetchHomeData(studentId)
+      .then((data) => {
+        if (!cancelled) setHomeData(data)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [studentId])
+
+  const currentIndex = homeData?.roadmapPosition.current_index ?? 0
+  const nodeIds = homeData?.roadmap.node_ids ?? []
+  const activeNodeId = nodeIds[Math.min(Math.max(currentIndex, 0), Math.max(nodeIds.length - 1, 0))] ?? ''
+  const activeConcept = activeNodeId ? conceptTitle(activeNodeId, homeData?.roadmap.concepts) : ''
+  const progress = nodeIds.length ? Math.round((currentIndex / nodeIds.length) * 100) : 0
+  const subtitle = homeData ? studentSubtitle(homeData.student) : ''
   const homeRoadmapPath = persona ? persona.primaryRoadmapPath : '/roadmap'
-  const roadmapPreview = HOME_ROADMAP_PREVIEW[homeRoadmapPath] ?? HOME_ROADMAP_PREVIEW['/roadmap']
-
-  const getPersonaGreeting = () => {
-    if (!persona) return 'Alex'
-    return persona.name
+  const roadmapOutcomes = useMemo(
+    () => makeRoadmapOutcomes(nodeIds, homeData?.roadmap.concepts, currentIndex),
+    [nodeIds, homeData?.roadmap.concepts, currentIndex],
+  )
+  const recommendations = homeData ? makeRecommendations(homeData.student, activeConcept) : []
+  const dueReviews = useMemo(() => {
+    const now = Date.now()
+    const nextWeek = now + 7 * 24 * 60 * 60 * 1000
+    return (homeData?.srsDue.due ?? []).filter((record) => {
+      if (!record.next_review_at) return false
+      const time = new Date(record.next_review_at).getTime()
+      return Number.isFinite(time) && time >= now && time <= nextWeek
+    })
+  }, [homeData?.srsDue.due])
+  const firstDueDate = dueReviews[0]?.next_review_at ? new Date(dueReviews[0].next_review_at) : null
+  const handleStartHere = async (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    try {
+      const session = await startSession(studentId)
+      navigate(`/lesson?session_id=${encodeURIComponent(session.session_id)}`)
+    } catch (err) {
+      setError(String(err))
+    }
   }
-
-  const getPersonaProgress = () => {
-    if (currentPersona === 'alice') return { progress: 25, percentile: 68 }
-    if (currentPersona === 'bob') return { progress: 15, percentile: 55 }
-    if (currentPersona === 'charles') return { progress: 45, percentile: 88 }
-    return { progress: 65, percentile: 82 }
-  }
-
-  const getPersonaSkills = () => {
-    if (currentPersona === 'alice') {
-      return [
-        { name: 'Python Programming', value: 30, color: 'bg-primary' },
-        { name: 'Data Structures', value: 15, color: 'bg-secondary' },
-        { name: 'Algorithm Design', value: 10, color: 'bg-accent' },
-      ]
-    }
-    if (currentPersona === 'bob') {
-      return [
-        { name: 'Financial Analysis', value: 90, color: 'bg-primary' },
-        { name: 'Market Assessment', value: 85, color: 'bg-secondary' },
-        { name: 'Policy Evaluation', value: 80, color: 'bg-accent' },
-      ]
-    }
-    if (currentPersona === 'charles') {
-      return [
-        { name: 'Financial Statements', value: 75, color: 'bg-primary' },
-        { name: 'Cost Accounting', value: 60, color: 'bg-secondary' },
-        { name: 'Managerial Accounting', value: 50, color: 'bg-accent' },
-      ]
-    }
-    return [
-      { name: 'Financial Modeling', value: 85, color: 'bg-primary' },
-      { name: 'Supply Chain Mgmt', value: 72, color: 'bg-secondary' },
-      { name: 'Data Visualization', value: 40, color: 'bg-accent' },
-    ]
-  }
-
-  const getPersonaRecommendations = () => {
-    if (currentPersona === 'alice') {
-      return [
-        {
-          icon: 'play_circle',
-          badge: 'Video Lesson',
-          badgeColor: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
-          iconColor: 'bg-red-50 dark:bg-red-900/30 text-red-600 group-hover:bg-red-600',
-          borderColor: 'border-red-200/70 dark:border-red-700/40 hover:border-red-500/60',
-          title: 'Video: Python Loops Explained',
-          meta: '15 min video',
-        },
-        {
-          icon: 'code',
-          badge: 'Hands-On',
-          badgeColor: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
-          iconColor: 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 group-hover:bg-indigo-600',
-          borderColor: 'border-indigo-200/70 dark:border-indigo-700/40 hover:border-indigo-500/60',
-          title: 'Coding Challenge: FizzBuzz',
-          meta: '30 min activity',
-        },
-        {
-          icon: 'play_circle',
-          badge: 'Video Lesson',
-          badgeColor: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400',
-          iconColor: 'bg-red-50 dark:bg-red-900/30 text-red-600 group-hover:bg-red-600',
-          borderColor: 'border-red-200/70 dark:border-red-700/40 hover:border-red-500/60',
-          title: 'Video: Understanding Functions',
-          meta: '22 min video',
-        },
-      ]
-    }
-    if (currentPersona === 'bob') {
-      return [
-        {
-          icon: 'auto_stories',
-          badge: 'Deep Dive',
-          badgeColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary',
-          iconColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary group-hover:bg-secondary',
-          borderColor: 'border-amber-200/70 dark:border-amber-700/40 hover:border-secondary/60',
-          title: 'Reading: Capital Markets Case Study',
-          meta: '25 page PDF',
-        },
-        {
-          icon: 'forum',
-          badge: 'AI Discussion',
-          badgeColor: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400',
-          iconColor: 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 group-hover:bg-purple-600',
-          borderColor: 'border-purple-200/70 dark:border-purple-700/40 hover:border-purple-500/60',
-          title: 'Discuss: Detroit Economic Revival',
-          meta: 'Interactive chat',
-        },
-        {
-          icon: 'auto_stories',
-          badge: 'Deep Dive',
-          badgeColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary',
-          iconColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary group-hover:bg-secondary',
-          borderColor: 'border-amber-200/70 dark:border-amber-700/40 hover:border-secondary/60',
-          title: 'Real Estate Finance Analysis',
-          meta: '18 page PDF',
-        },
-      ]
-    }
-    if (currentPersona === 'charles') {
-      return [
-        {
-          icon: 'style',
-          badge: 'Flashcards',
-          badgeColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary',
-          iconColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary group-hover:bg-primary',
-          borderColor: 'border-emerald-200/70 dark:border-emerald-700/40 hover:border-primary/60',
-          title: 'Review: Journal Entry Rules',
-          meta: '50 cards',
-        },
-        {
-          icon: 'quiz',
-          badge: 'Quick Quiz',
-          badgeColor: 'bg-orange-50 dark:bg-orange-900/30 text-accent',
-          iconColor: 'bg-orange-50 dark:bg-orange-900/30 text-accent group-hover:bg-accent',
-          borderColor: 'border-orange-200/70 dark:border-orange-700/40 hover:border-accent/60',
-          title: 'Quiz: Revenue Recognition',
-          meta: '10 questions',
-        },
-        {
-          icon: 'style',
-          badge: 'Flashcards',
-          badgeColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary',
-          iconColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary group-hover:bg-primary',
-          borderColor: 'border-emerald-200/70 dark:border-emerald-700/40 hover:border-primary/60',
-          title: 'Review: Financial Ratios',
-          meta: '30 cards',
-        },
-      ]
-    }
-    return [
-      {
-        icon: 'monitoring',
-        badge: 'Tech Interest',
-        badgeColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary',
-        iconColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary group-hover:bg-primary',
-        borderColor: 'border-emerald-200/70 dark:border-emerald-700/40 hover:border-primary/60',
-        title: 'Advanced Financial Modeling Activity',
-        meta: '45 min activity',
-      },
-      {
-        icon: 'auto_stories',
-        badge: 'Deep Dive',
-        badgeColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary',
-        iconColor: 'bg-amber-50 dark:bg-amber-900/30 text-secondary group-hover:bg-secondary',
-        borderColor: 'border-amber-200/70 dark:border-amber-700/40 hover:border-secondary/60',
-        title: 'Sustainability in Supply Chain - Required Reading',
-        meta: '12 page PDF',
-      },
-      {
-        icon: 'play_circle',
-        badge: 'Video Lesson',
-        badgeColor: 'bg-orange-50 dark:bg-orange-900/30 text-accent',
-        iconColor: 'bg-orange-50 dark:bg-orange-900/30 text-accent group-hover:bg-accent',
-        borderColor: 'border-orange-200/70 dark:border-orange-700/40 hover:border-accent/60',
-        title: 'Foundations of Quantitative Analysis',
-        meta: '18 min video',
-      },
-    ]
-  }
-
-  const { progress, percentile } = getPersonaProgress()
-  const skills = getPersonaSkills()
-  const recommendations = getPersonaRecommendations()
 
   return (
     <AppLayout
@@ -190,22 +209,43 @@ export default function HomePage() {
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
       title="Home"
       description="Your personalized learning hub and AI-enhanced recommendations."
+      sidebarProfileOverride={
+        homeData
+          ? {
+              displayName: homeData.student.name,
+              studentId: homeData.student.id,
+            }
+          : undefined
+      }
     >
       <div className="max-w-[1200px] w-full min-w-0 mx-auto px-8 lg:px-12 py-8 lg:py-12 space-y-8">
+        {loading && (
+          <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-8 border-2 border-amber-200/80 dark:border-amber-800/40 shadow-soft">
+            <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Loading your learning hub...</p>
+          </section>
+        )}
+
+        {error && !loading && (
+          <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-8 border-2 border-red-200/80 dark:border-red-800/40 shadow-soft">
+            <p className="text-sm font-semibold text-red-700 dark:text-red-300">{error}</p>
+          </section>
+        )}
+
+        {homeData && !loading && !error && (
+          <>
         <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-8 border-2 border-amber-200/80 dark:border-amber-800/40 shadow-soft bg-gradient-to-br from-white via-amber-50/20 to-white dark:from-slate-900 dark:via-slate-900/50 dark:to-slate-900">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2">
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white font-display">
-                Welcome back, {getPersonaGreeting()}.
+                Welcome back, {homeData.student.name}.
               </h1>
-              {persona && (
+              {subtitle && (
                 <p className="text-sm text-slate-600 dark:text-slate-300 font-semibold">
-                  {persona.major} · {persona.courseTitle}
+                  {subtitle}
                 </p>
               )}
               <p className="text-slate-500 dark:text-slate-400 font-medium">
                 Your personalized learning path is <span className="text-primary font-bold">{progress}% complete</span>.
-                You're ahead of {percentile}% of your cohort.
               </p>
             </div>
             <div className="flex gap-3">
@@ -242,10 +282,10 @@ export default function HomePage() {
             <div className="min-w-0">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary shrink-0">route</span>
-                <span className="break-words">{roadmapPreview.cardTitle}</span>
+                <span className="break-words">{subtitle || activeConcept || 'Your Roadmap'}</span>
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                {roadmapPreview.cardSubtitle}
+                {nodeIds.length} learning outcomes · Personalized for {homeData.student.name}
               </p>
             </div>
           </div>
@@ -254,9 +294,10 @@ export default function HomePage() {
             compact
             showViewFullLink
             scrollable
-            outcomes={roadmapPreview.outcomes}
-            startHereTo={roadmapPreview.startHerePath}
-            viewFullTo={roadmapPreview.fullRoadmapPath}
+            outcomes={roadmapOutcomes}
+            startHereTo={activeNodeId ? `/lesson/${encodeURIComponent(activeNodeId)}/interactive?course=${encodeURIComponent(homeData.roadmap.course)}` : homeRoadmapPath}
+            viewFullTo={homeRoadmapPath}
+            onStartHere={handleStartHere}
           />
         </section>
 
@@ -291,38 +332,9 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-            <div className="rounded-2xl border-2 border-indigo-200/70 dark:border-indigo-700/40 bg-white/95 dark:bg-slate-900/95 p-6 shadow-sm bg-gradient-to-br from-white via-indigo-50/10 to-white dark:from-slate-900 dark:via-indigo-950/20 dark:to-slate-900">
-              <div className="mb-8 flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display">Personal Skill Growth</h2>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">Your progress is automatically synced to guide your next steps.</p>
-                </div>
-                <span className="material-symbols-outlined text-slate-300 cursor-help">info</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
-                <div className="relative mx-auto flex h-56 w-56 items-center justify-center">
-                  <div className="absolute h-full w-full rounded-full border border-slate-50 dark:border-slate-800" />
-                  <div className="absolute h-3/4 w-3/4 rounded-full border border-slate-50 dark:border-slate-800" />
-                  <div className="absolute h-1/2 w-1/2 rounded-full border border-slate-50 dark:border-slate-800" />
-                  <div className="skill-radar absolute inset-0 bg-indigo-500/10 border-2 border-indigo-400/30" />
-                </div>
-                <div className="space-y-6">
-                  {skills.map((skill, index) => (
-                    <div key={index} className="space-y-2">
-                      <div className="flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <span>{skill.name}</span>
-                        <span className="text-primary">{skill.value}%</span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800">
-                        <div className={`h-full rounded-full ${skill.color}`} style={{ width: `${skill.value}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
           </div>
 
+          {dueReviews.length > 0 && (
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2 font-display">
               <span className="material-symbols-outlined text-primary">event_note</span>
@@ -330,7 +342,9 @@ export default function HomePage() {
             </h2>
             <div className="rounded-2xl border border-primary/20 dark:border-primary/30 bg-white dark:bg-slate-900 p-4 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
-                <span className="text-sm font-bold text-slate-800 dark:text-slate-200">October 2023</span>
+                <span className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                  {firstDueDate ? formatMonth(firstDueDate) : ''}
+                </span>
                 <div className="flex gap-2">
                   <span className="material-symbols-outlined text-lg text-slate-400 cursor-pointer">chevron_left</span>
                   <span className="material-symbols-outlined text-lg text-slate-400 cursor-pointer">chevron_right</span>
@@ -340,69 +354,54 @@ export default function HomePage() {
                 <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center">
-                <div className="p-1 text-xs text-slate-300">25</div>
-                <div className="p-1 text-xs text-slate-300">26</div>
-                <div className="p-1 text-xs text-slate-300">27</div>
-                <div className="p-1 text-xs text-slate-300">28</div>
-                <div className="p-1 text-xs text-slate-300">29</div>
-                <div className="p-1 text-xs text-slate-300">30</div>
-                <div className="p-1 text-xs text-slate-800 dark:text-slate-300">1</div>
-                <div className="p-1 text-xs text-slate-800 dark:text-slate-300">2</div>
-                <div className="p-1 text-xs font-bold text-primary ring-1 ring-primary rounded-md">3</div>
-                <div className="p-1 text-xs text-slate-800 dark:text-slate-300">4</div>
-                <div className="p-1 text-xs text-slate-800 dark:text-slate-300">5</div>
-                <div className="relative p-1 text-xs text-slate-800 dark:text-slate-300 font-bold">6<span className="absolute bottom-0 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-red-500" /></div>
-                <div className="p-1 text-xs text-slate-800 dark:text-slate-300">7</div>
-                <div className="p-1 text-xs text-slate-800 dark:text-slate-300">8</div>
+                {Array.from({ length: 14 }, (_, index) => {
+                  const base = firstDueDate ? new Date(firstDueDate) : new Date()
+                  base.setDate(base.getDate() - 6 + index)
+                  const hasReview = dueReviews.some((record) => {
+                    if (!record.next_review_at) return false
+                    const reviewDate = new Date(record.next_review_at)
+                    return reviewDate.toDateString() === base.toDateString()
+                  })
+                  return (
+                    <div
+                      key={base.toISOString()}
+                      className={`p-1 text-xs ${hasReview ? 'font-bold text-primary ring-1 ring-primary rounded-md' : 'text-slate-800 dark:text-slate-300'}`}
+                    >
+                      {base.getDate()}
+                    </div>
+                  )
+                })}
               </div>
             </div>
             <div className="space-y-4">
-              <div className="flex gap-4 rounded-xl border-l-4 border-red-400 bg-white dark:bg-slate-900 p-4 shadow-sm border-2 border-red-100 dark:border-red-900/40">
-                <div className="flex-1 space-y-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-red-500">High Priority</p>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-tight font-display">
-                    {currentPersona === 'alice' ? 'Problem Set 2 Due' : currentPersona === 'bob' ? 'Case Study Analysis' : currentPersona === 'charles' ? 'Midterm Exam Prep' : 'Midterm Project Submission'}
-                  </h4>
-                  <p className="text-xs text-slate-500">Due in 3 days · {persona?.courseTitle.slice(0, 20) || 'Econ 301'}</p>
-                </div>
-              </div>
-              <div className="flex gap-4 rounded-xl border-l-4 border-primary bg-white dark:bg-slate-900 p-4 shadow-sm border-2 border-emerald-100 dark:border-emerald-900/40">
-                <div className="flex-1 space-y-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Assessment</p>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-tight font-display">
-                    {currentPersona === 'alice' ? 'Quiz: Python Basics' : currentPersona === 'bob' ? 'Quiz: Capital Markets' : currentPersona === 'charles' ? 'Quiz: Journal Entries' : 'Quiz: Macroeconomics'}
-                  </h4>
-                  <p className="text-xs text-slate-500">Friday, Oct 6 · 10:00 AM</p>
-                </div>
-              </div>
-              <div className="flex gap-4 rounded-xl border-l-4 border-slate-300 bg-white dark:bg-slate-900 p-4 shadow-sm border-2 border-slate-200 dark:border-slate-700">
-                <div className="flex-1 space-y-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Study Reminder</p>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-tight font-display">
-                    {currentPersona === 'alice' ? 'Practice Coding Exercises' : currentPersona === 'bob' ? 'Review Detroit Case Study' : currentPersona === 'charles' ? 'Flashcard Review Session' : 'Review Case Study 4'}
-                  </h4>
-                  <p className="text-xs text-slate-500">Personal Goal</p>
-                </div>
-              </div>
-            </div>
-            <div className="rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 p-6 border-2 border-emerald-100 dark:border-emerald-800 shadow-soft">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white dark:bg-slate-900 shadow-sm">
-                  <span className="material-symbols-outlined text-primary">tips_and_updates</span>
-                </div>
-                <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><span className="material-symbols-outlined text-lg">close</span></button>
-              </div>
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-2 font-display">Personalized Study Tip</h4>
-              <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300 font-medium">
-                {currentPersona === 'alice' && 'Watch the video on loops before attempting the next problem set. Visual learning will help you grasp the concepts faster.'}
-                {currentPersona === 'bob' && 'The Detroit case study relates closely to your current module. Spend extra time on the policy analysis section.'}
-                {currentPersona === 'charles' && 'Based on your study pace, you can complete 3 more modules this week. Focus on flashcard reviews for maximum retention.'}
-                {currentPersona === 'demo' && 'Based on your recent scores, focusing on "Exchange Rate Theory" could improve your upcoming quiz grade by ~15%.'}
-              </p>
-              <button className="mt-4 w-full rounded-xl bg-white dark:bg-slate-900 border-2 border-emerald-200 dark:border-emerald-800 py-2.5 text-xs font-bold text-primary hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-all shadow-sm">Add to Study Plan</button>
+              {dueReviews.slice(0, 3).map((record: DueSrsRecord, index) => {
+                const nodeId = String(record.node_id || record.concept_id || '')
+                const border = index === 0
+                  ? 'border-red-400 border-red-100 dark:border-red-900/40'
+                  : index === 1
+                    ? 'border-primary border-emerald-100 dark:border-emerald-900/40'
+                    : 'border-slate-300 border-slate-200 dark:border-slate-700'
+                const labelColor = index === 0 ? 'text-red-500' : index === 1 ? 'text-primary' : 'text-slate-400'
+                return (
+                  <div key={`${nodeId}-${record.next_review_at}`} className={`flex gap-4 rounded-xl border-l-4 bg-white dark:bg-slate-900 p-4 shadow-sm border-2 ${border}`}>
+                    <div className="flex-1 space-y-1">
+                      <p className={`text-[10px] font-bold uppercase tracking-wider ${labelColor}`}>
+                        {index === 0 ? 'High Priority' : index === 1 ? 'Assessment' : 'Study Reminder'}
+                      </p>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-tight font-display">
+                        Review: {conceptTitle(nodeId, homeData.roadmap.concepts)}
+                      </h4>
+                      <p className="text-xs text-slate-500">{formatDueText(record.next_review_at)}</p>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
+          )}
         </div>
+        </>
+        )}
       </div>
     </AppLayout>
   )

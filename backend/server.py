@@ -347,6 +347,36 @@ def _save_roadmap_cache(course: str, data: dict) -> None:
         data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _course_from_student(student: dict[str, Any]) -> str:
+    goals = student.get("learning_goals") or {}
+    if not isinstance(goals, dict):
+        goals = {}
+    target = " ".join(
+        str(goals.get(key) or "")
+        for key in ("target_course", "course", "primary_focus")
+    ).lower()
+    if "python" in target or "computer science" in target:
+        return "python"
+    if "financ" in target and "account" not in target:
+        return "financing"
+    return "accounting"
+
+
+def _node_ids_from_cached_roadmap(course: str) -> list[str] | None:
+    cached = _load_roadmap_cache(course)
+    if not cached:
+        return None
+    lessons = cached.get("lessons") or []
+    if not isinstance(lessons, list):
+        return None
+    node_ids = [
+        str(lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
+        for lesson in lessons
+        if isinstance(lesson, dict) and (lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
+    ]
+    return node_ids or None
+
+
 def _build_and_cache(course: str, lecture_id: str | None) -> dict:
     from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
     if lecture_id:
@@ -532,6 +562,24 @@ class LessonScoreRequest(BaseModel):
     metadata: Dict[str, Any] | None = None
 
 
+class SessionStartRequest(BaseModel):
+    student_id: str
+    course: Optional[str] = None
+
+
+class LessonBlockRequest(BaseModel):
+    session_id: str
+
+
+class LessonMessageRequest(BaseModel):
+    session_id: str
+    message: Optional[str] = None
+
+
+class LessonCompleteRequest(BaseModel):
+    session_id: str
+
+
 def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None) -> dict[str, Any]:
     cached = _load_lesson_cache(
         persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
@@ -612,7 +660,7 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
 
     from personas import get_persona
     from srs import PASSING_SCORE, advance_roadmap_progress, upsert_srs_record
-    from supabase.supabase_client import get_supabase_client
+    from supabase_local import get_supabase_client
 
     try:
         persona = get_persona(req.persona)
@@ -684,7 +732,7 @@ def get_due_reviews(
 ) -> dict[str, Any]:
     from personas import get_persona
     from srs import get_due_srs_records
-    from supabase.supabase_client import get_supabase_client
+    from supabase_local import get_supabase_client
 
     if not student_id:
         try:
@@ -699,6 +747,224 @@ def get_due_reviews(
         return {"student_id": student_id, "due": due, "review_mode": bool(due)}
     except Exception as exc:
         import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/roadmap_position/{student_id}")
+def get_student_roadmap_position(student_id: str) -> dict[str, Any]:
+    from srs import get_roadmap_position
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        sc_rows = sc_resp.data or []
+        course_id = str(sc_rows[0]["course_id"]) if sc_rows else ""
+        position = get_roadmap_position(student_id, course_id=course_id, client=supabase)
+        return {
+            "student_id": student_id,
+            "course_id": course_id,
+            "current_index": int(position.get("current_index") or 0),
+            "updated_at": position.get("updated_at"),
+        }
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/roadmap/generate/{student_id}")
+def generate_student_roadmap(student_id: str) -> dict[str, Any]:
+    from graphdb.neo4j_client import get_concept_roadmap_scoped
+    from srs import get_roadmap_position
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+
+        # look up enrolled course from student_courses
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        sc_rows = sc_resp.data or []
+        if not sc_rows:
+            raise HTTPException(status_code=404, detail="no course enrollment found for student")
+        course_id = str(sc_rows[0]["course_id"])
+
+        concepts = get_concept_roadmap_scoped(course_id)
+
+        position = get_roadmap_position(student_id, course_id=course_id, client=supabase)
+        current_index = int(position.get("current_index") or 0)
+
+        enriched = []
+        for i, c in enumerate(concepts):
+            if i < current_index:
+                state = "completed"
+            elif i == current_index:
+                state = "active"
+            else:
+                state = "locked"
+            enriched.append({
+                "id": str(c.get("id") or c.get("name") or ""),
+                "name": c.get("name") or "",
+                "description": c.get("description") or "",
+                "state": state,
+            })
+
+        node_ids = [c["id"] for c in enriched]
+        return {
+            "student_id": student_id,
+            "course_id": course_id,
+            "current_index": current_index,
+            "node_ids": node_ids,
+            "concepts": enriched,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/roadmap/{student_id}")
+def get_student_roadmap(student_id: str) -> dict[str, Any]:
+    return generate_student_roadmap(student_id)
+
+
+@app.get("/courses")
+def get_courses_endpoint() -> dict[str, Any]:
+    from graphdb.neo4j_client import get_courses
+
+    try:
+        return {"courses": get_courses()}
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/srs/due/{student_id}")
+def get_due_reviews_for_student(student_id: str) -> dict[str, Any]:
+    from srs import get_upcoming_srs_records
+    from supabase_local import get_supabase_client
+
+    try:
+        due = get_upcoming_srs_records(student_id, days=7, client=get_supabase_client())
+        return {"student_id": student_id, "due": due, "review_mode": bool(due)}
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/student/{student_id}")
+def get_student(student_id: str) -> dict[str, Any]:
+    from supabase_local import get_student_profile, get_supabase_client
+
+    try:
+        profile = get_student_profile(student_id, client=get_supabase_client())
+        if not profile:
+            raise HTTPException(status_code=404, detail="student not found")
+        return profile
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/session/start")
+def adaptive_session_start(req: SessionStartRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import start_session
+
+        return start_session(req.student_id, req.course)
+    except ValueError as exc:
+        msg = str(exc)
+        if "No course enrollment" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/session/{session_id}")
+def adaptive_session_get(session_id: str) -> dict[str, Any]:
+    try:
+        from adaptive_session import get_session_public
+
+        return get_session_public(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/block")
+def adaptive_lesson_block(req: LessonBlockRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import generate_block
+
+        return generate_block(req.session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/message")
+def adaptive_lesson_message(req: LessonMessageRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import lesson_message
+
+        return lesson_message(req.session_id, req.message)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/complete")
+def adaptive_lesson_complete(req: LessonCompleteRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import complete_lesson
+
+        return complete_lesson(req.session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc))
 
