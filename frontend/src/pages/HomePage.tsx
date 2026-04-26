@@ -295,7 +295,7 @@ export default function HomePage() {
             showViewFullLink
             scrollable
             outcomes={roadmapOutcomes}
-            startHereTo={activeNodeId ? `/lesson/${encodeURIComponent(activeNodeId)}/interactive?course=${encodeURIComponent(homeData.roadmap.course)}` : homeRoadmapPath}
+            startHereTo={activeNodeId ? `/lesson/${encodeURIComponent(activeNodeId)}/interactive?course=${encodeURIComponent(homeData.roadmap.course_id)}` : homeRoadmapPath}
             viewFullTo={homeRoadmapPath}
             onStartHere={handleStartHere}
           />

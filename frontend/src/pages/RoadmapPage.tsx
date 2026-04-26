@@ -2,7 +2,6 @@ import { MouseEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
-import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 import { usePersona } from '../contexts/PersonaContext'
 import { fetchStudentRoadmapData, startSession, type GeneratedRoadmapConcept } from '../api/home'
@@ -36,7 +35,6 @@ export default function RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [data, setData] = useState<RoadmapData | null>(null)
-  const [selectedPath, setSelectedPath] = useState('/roadmap')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const { studentId } = usePersona()
@@ -90,9 +88,6 @@ export default function RoadmapPage() {
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
       title={title}
       description={description}
-      action={<RoadmapCourseSelect variant="header" value={selectedPath} onValueChange={(path) => {
-        setSelectedPath(path)
-      }} />}
     >
       <div className="max-w-[800px] w-full min-w-0 mx-auto px-8 lg:px-12 py-8 lg:py-12">
         {error && (

@@ -36,11 +36,13 @@ export type GeneratedRoadmapConcept = {
   id?: string
   name?: string
   description?: string
+  state?: 'completed' | 'active' | 'locked'
 }
 
 export type GeneratedRoadmap = {
   student_id: string
-  course: string
+  course_id: string
+  current_index?: number
   node_ids: string[]
   concepts?: GeneratedRoadmapConcept[]
 }
@@ -121,7 +123,7 @@ export async function fetchCoursesData(studentId: string): Promise<{
   roadmap: GeneratedRoadmap
 }> {
   const [coursesResponse, roadmap] = await Promise.all([
-    getJson<{ courses: CourseNode[] }>('/courses'),
+    getJson<{ courses: CourseNode[] }>(`/student/${studentId}/courses`),
     getJson<GeneratedRoadmap>(`/roadmap/${studentId}`),
   ])
   return { courses: coursesResponse.courses, roadmap }

@@ -18,11 +18,9 @@ function coursePath(course: CourseNode): string {
   return `/roadmap/${encodeURIComponent(course.id)}`
 }
 
-function isActiveCourse(course: CourseNode, activeCourse: string | undefined): boolean {
-  if (!activeCourse) return false
-  const values = [course.id, course.course_code, course.title].filter(Boolean).map((value) => String(value).toLowerCase())
-  const active = activeCourse.toLowerCase()
-  return values.some((value) => value === active || value.includes(active) || active.includes(value))
+function isActiveCourse(course: CourseNode, activeCourseId: string | undefined): boolean {
+  if (!activeCourseId) return false
+  return String(course.id) === String(activeCourseId)
 }
 
 export default function CoursesPage() {
@@ -97,7 +95,7 @@ export default function CoursesPage() {
         ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-10 min-w-0">
           {courses.map((course, i) => {
-            const active = isActiveCourse(course, data?.roadmap.course)
+            const active = isActiveCourse(course, data?.roadmap.course_id)
             return (
             <div
               key={course.id}

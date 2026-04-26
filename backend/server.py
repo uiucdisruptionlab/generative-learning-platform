@@ -858,6 +858,33 @@ def get_courses_endpoint() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/student/{student_id}/courses")
+def get_student_enrolled_courses(student_id: str) -> dict[str, Any]:
+    """Only the Neo4j Course nodes that the student is enrolled in via student_courses."""
+    from graphdb.neo4j_client import get_courses
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .execute()
+        )
+        enrolled_ids = {str(row["course_id"]) for row in (sc_resp.data or [])}
+        if not enrolled_ids:
+            return {"courses": []}
+        all_courses = get_courses()
+        filtered = [c for c in all_courses if str(c.get("id") or "") in enrolled_ids]
+        return {"courses": filtered}
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/srs/due/{student_id}")
 def get_due_reviews_for_student(student_id: str) -> dict[str, Any]:
     from srs import get_upcoming_srs_records
