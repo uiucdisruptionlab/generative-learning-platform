@@ -8,7 +8,9 @@ import {
   fetchHomeData,
   startSession,
   type DueSrsRecord,
+  type GeneratedRoadmap,
   type GeneratedRoadmapConcept,
+  type GeneratedRoadmapLesson,
   type StudentProfile,
 } from '../api/home'
 
@@ -112,20 +114,30 @@ function makeRecommendations(student: StudentProfile, activeConcept: string): Re
   })
 }
 
-function makeRoadmapOutcomes(
-  nodeIds: string[],
-  concepts: GeneratedRoadmapConcept[] | undefined,
-  currentIndex: number,
-): HomeRoadmapOutcome[] {
-  const start = Math.max(0, currentIndex - 1)
-  const end = Math.min(nodeIds.length, currentIndex + 2)
-  return nodeIds.slice(start, end).map((nodeId, offset) => {
-    const index = start + offset
+function lessonStateToStatus(state: GeneratedRoadmapLesson['state']): HomeRoadmapOutcome['status'] {
+  if (state === 'completed') return 'completed'
+  if (state === 'active') return 'current'
+  return 'upcoming'
+}
+
+function makeLessonOutcomes(roadmap: GeneratedRoadmap | undefined): HomeRoadmapOutcome[] {
+  const lessons = roadmap?.lessons ?? []
+  if (!lessons.length) return []
+  const activeIndex = Math.max(0, lessons.findIndex((lesson) => lesson.state === 'active'))
+  const start = Math.max(0, activeIndex - 1)
+  const end = Math.min(lessons.length, activeIndex + 2)
+  return lessons.slice(start, end).map((lesson) => {
+    const conceptCount = lesson.concepts?.length ?? 0
     return {
-      id: nodeId,
-      title: conceptTitle(nodeId, concepts),
-      status: index < currentIndex ? 'completed' : index === currentIndex ? 'current' : 'upcoming',
-      subtext: index === currentIndex ? 'Based on your progress, this is the right place to start.' : undefined,
+      id: lesson.lesson_id,
+      title: lesson.title,
+      status: lessonStateToStatus(lesson.state),
+      subtext:
+        lesson.state === 'active'
+          ? lesson.summary?.trim() || 'Based on your progress, this is the right place to start.'
+          : conceptCount
+            ? `${conceptCount} concept${conceptCount === 1 ? '' : 's'}`
+            : undefined,
     }
   })
 }
@@ -171,15 +183,17 @@ export default function HomePage() {
 
   const currentIndex = homeData?.roadmapPosition.current_index ?? 0
   const nodeIds = homeData?.roadmap.node_ids ?? []
-  const activeNodeId = nodeIds[Math.min(Math.max(currentIndex, 0), Math.max(nodeIds.length - 1, 0))] ?? ''
-  const activeConcept = activeNodeId ? conceptTitle(activeNodeId, homeData?.roadmap.concepts) : ''
+  const lessons = homeData?.roadmap.lessons ?? []
+  const activeLesson = useMemo(() => lessons.find((lesson) => lesson.state === 'active'), [lessons])
+  const activeNodeId =
+    activeLesson?.concepts.find((c) => c.state === 'active')?.id ??
+    nodeIds[Math.min(Math.max(currentIndex, 0), Math.max(nodeIds.length - 1, 0))] ??
+    ''
+  const activeConcept = activeLesson?.title || (activeNodeId ? conceptTitle(activeNodeId, homeData?.roadmap.concepts) : '')
   const progress = nodeIds.length ? Math.round((currentIndex / nodeIds.length) * 100) : 0
   const subtitle = homeData ? studentSubtitle(homeData.student) : ''
   const homeRoadmapPath = persona ? persona.primaryRoadmapPath : '/roadmap'
-  const roadmapOutcomes = useMemo(
-    () => makeRoadmapOutcomes(nodeIds, homeData?.roadmap.concepts, currentIndex),
-    [nodeIds, homeData?.roadmap.concepts, currentIndex],
-  )
+  const roadmapOutcomes = useMemo(() => makeLessonOutcomes(homeData?.roadmap), [homeData?.roadmap])
   const recommendations = homeData ? makeRecommendations(homeData.student, activeConcept) : []
   const dueReviews = useMemo(() => {
     const now = Date.now()
@@ -285,7 +299,7 @@ export default function HomePage() {
                 <span className="break-words">{subtitle || activeConcept || 'Your Roadmap'}</span>
               </h2>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                {nodeIds.length} learning outcomes · Personalized for {homeData.student.name}
+                {lessons.length} lesson{lessons.length === 1 ? '' : 's'} · Personalized for {homeData.student.name}
               </p>
             </div>
           </div>
@@ -295,7 +309,7 @@ export default function HomePage() {
             showViewFullLink
             scrollable
             outcomes={roadmapOutcomes}
-            startHereTo={activeNodeId ? `/lesson/${encodeURIComponent(activeNodeId)}/interactive?course=${encodeURIComponent(homeData.roadmap.course_id)}` : homeRoadmapPath}
+            startHereTo={activeLesson ? `/lesson?lesson_id=${encodeURIComponent(activeLesson.lesson_id)}` : homeRoadmapPath}
             viewFullTo={homeRoadmapPath}
             onStartHere={handleStartHere}
           />

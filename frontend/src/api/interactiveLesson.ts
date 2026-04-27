@@ -145,14 +145,17 @@ function blockToWidget(type?: AdaptiveResponse['type'], content: Record<string, 
   }
   if (type === 'video') {
     const searchQuery = String(content.search_query ?? '')
+    const url = String(content.url ?? '')
+    const title = String(content.title ?? '')
     return {
       type: 'video',
       payload: {
-        title: searchQuery || 'Recommended YouTube search',
-        url: '',
-        channel: 'YouTube',
-        thumbnail: '',
+        title: title || searchQuery || 'Recommended YouTube search',
+        url,
+        channel: String(content.channel ?? '') || 'YouTube',
+        thumbnail: String(content.thumbnail ?? ''),
         reason: String(content.why ?? ''),
+        search_query_used: String(content.search_query_used ?? searchQuery),
         search_query_attempted: searchQuery,
       },
     }

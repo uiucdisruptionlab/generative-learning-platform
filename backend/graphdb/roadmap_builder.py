@@ -610,5 +610,210 @@ def build_roadmap_for_lecture(
     return roadmap
 
 
+# ---------------------------------------------------------------------------
+# Lecture-grouped lesson roadmap (the path the student-facing endpoint uses).
+# ---------------------------------------------------------------------------
+
+# Single-lecture courses are subdivided into roughly this many lesson candidates
+# before the LLM refiner gets to them.
+_TARGET_LESSONS_FOR_SINGLE_LECTURE = 10
+
+
+def _build_lesson_candidates(lectures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Turn lecture-grouped concepts into lesson candidates for the LLM refiner.
+
+    - Multiple lectures: one candidate per lecture (the natural grouping).
+    - Single lecture: subdivide by consecutive chunk groups so the refiner has
+      something coarser than "one giant lesson with 160 concepts" to work with.
+    """
+    if not lectures:
+        return []
+
+    if len(lectures) > 1:
+        candidates: list[dict[str, Any]] = []
+        for i, lec in enumerate(lectures):
+            concepts = [
+                {"name": c["name"], "description": c.get("description") or ""}
+                for c in lec.get("concepts", [])
+            ]
+            if not concepts:
+                continue
+            candidates.append({
+                "lesson_id": f"L{i + 1:03d}",
+                "title": str(lec.get("lecture_title") or lec.get("lecture_id") or f"Lesson {i + 1}"),
+                "summary": "",
+                "concepts": concepts,
+                "chunk_ids": [str(ch["chunk_id"]) for ch in lec.get("chunks", [])],
+                "lecture_ids": [str(lec.get("lecture_id") or "")],
+                "prerequisites": [],
+            })
+        return candidates
+
+    # Single-lecture course: chunk-group subdivide.
+    lec = lectures[0]
+    chunks = lec.get("chunks", []) or []
+    concepts_in_lec = lec.get("concepts", []) or []
+    lecture_id = str(lec.get("lecture_id") or "")
+    if not concepts_in_lec:
+        return []
+    if not chunks:
+        return [{
+            "lesson_id": "L001",
+            "title": str(lec.get("lecture_title") or lecture_id or "Lesson 1"),
+            "summary": "",
+            "concepts": [
+                {"name": c["name"], "description": c.get("description") or ""}
+                for c in concepts_in_lec
+            ],
+            "chunk_ids": [],
+            "lecture_ids": [lecture_id],
+            "prerequisites": [],
+        }]
+
+    chunk_to_concepts: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for c in concepts_in_lec:
+        chunk_to_concepts[str(c.get("chunk_id") or "")].append(c)
+
+    target = min(_TARGET_LESSONS_FOR_SINGLE_LECTURE, len(chunks))
+    target = max(1, target)
+    per_group = max(1, len(chunks) // target)
+
+    candidates: list[dict[str, Any]] = []
+    for i in range(0, len(chunks), per_group):
+        group = chunks[i:i + per_group]
+        group_chunk_ids = [str(ch["chunk_id"]) for ch in group]
+        seen: set[str] = set()
+        group_concepts: list[dict[str, Any]] = []
+        for ch in group:
+            for c in chunk_to_concepts.get(str(ch.get("chunk_id") or ""), []):
+                key = str(c.get("name") or "").strip().lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    group_concepts.append({
+                        "name": c["name"],
+                        "description": c.get("description") or "",
+                    })
+        if not group_concepts:
+            continue
+        candidates.append({
+            "lesson_id": f"L{len(candidates) + 1:03d}",
+            "title": f"{lecture_id} part {len(candidates) + 1}",
+            "summary": "",
+            "concepts": group_concepts,
+            "chunk_ids": group_chunk_ids,
+            "lecture_ids": [lecture_id],
+            "prerequisites": [],
+        })
+    return candidates
+
+
+def _attach_concept_ids(
+    refined_lessons: list[dict[str, Any]],
+    name_to_id: dict[str, str],
+    name_to_description: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Re-attach Neo4j concept IDs to LLM-refined lessons by name.
+
+    Drops concepts the LLM kept that don't exist in Neo4j (renamed or invented).
+    Drops lessons that end up with zero attachable concepts.
+    """
+    attached: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for i, lesson in enumerate(refined_lessons or []):
+        lesson_concepts: list[dict[str, Any]] = []
+        for c in lesson.get("concepts", []) or []:
+            raw_name = str(c.get("name") or "").strip()
+            key = raw_name.lower()
+            cid = name_to_id.get(key)
+            if not cid or cid in seen_ids:
+                continue
+            seen_ids.add(cid)
+            lesson_concepts.append({
+                "id": cid,
+                "name": raw_name,
+                "description": str(
+                    c.get("description") or name_to_description.get(key, "")
+                ),
+            })
+        if not lesson_concepts:
+            continue
+        attached.append({
+            "lesson_id": str(lesson.get("lesson_id") or f"L{i + 1:03d}"),
+            "title": str(lesson.get("title") or "").strip() or f"Lesson {i + 1}",
+            "summary": str(lesson.get("summary") or "").strip(),
+            "lecture_ids": [str(x) for x in (lesson.get("lecture_ids") or [])],
+            "concepts": lesson_concepts,
+        })
+    return attached
+
+
+def build_course_lesson_roadmap(
+    course_id: str,
+    refine_with_llm: bool = True,
+) -> dict[str, Any]:
+    """Lecture-grouped, LLM-refined roadmap for a single course.
+
+    Returns:
+        {
+            "course_id": "...",
+            "lesson_count": N,
+            "lessons": [{lesson_id, title, summary, lecture_ids, concepts}],
+            "node_ids": [concept_id, ...],   # flat ordered concept IDs
+        }
+    """
+    from graphdb.neo4j_client import get_lecture_grouped_concepts
+
+    lectures = get_lecture_grouped_concepts(course_id)
+    if not lectures:
+        return {"course_id": course_id, "lesson_count": 0, "lessons": [], "node_ids": []}
+
+    name_to_id: dict[str, str] = {}
+    name_to_description: dict[str, str] = {}
+    for lec in lectures:
+        for c in lec.get("concepts", []) or []:
+            key = str(c.get("name") or "").strip().lower()
+            if not key:
+                continue
+            name_to_id.setdefault(key, str(c.get("id") or ""))
+            if c.get("description"):
+                name_to_description.setdefault(key, str(c["description"]))
+
+    candidates = _build_lesson_candidates(lectures)
+    refined_lessons: list[dict[str, Any]] = candidates
+
+    if refine_with_llm and candidates:
+        try:
+            from graphdb.roadmap_refiner import refine_roadmap_with_llm
+
+            rough = {
+                "course": course_id,
+                "lesson_count": len(candidates),
+                "lessons": candidates,
+            }
+            refined = refine_roadmap_with_llm(rough)
+            refined_lessons = refined.get("lessons") or candidates
+        except Exception as exc:
+            print(f"[roadmap_builder] LLM refinement failed for {course_id!r}: {exc}; using raw lecture grouping")
+            refined_lessons = candidates
+
+    final_lessons = _attach_concept_ids(refined_lessons, name_to_id, name_to_description)
+    if not final_lessons:
+        # Refiner may have produced output that doesn't match any known concept names.
+        # Fall back to the raw candidates so the student still gets *something*.
+        final_lessons = _attach_concept_ids(candidates, name_to_id, name_to_description)
+
+    node_ids: list[str] = []
+    for lesson in final_lessons:
+        for c in lesson["concepts"]:
+            node_ids.append(c["id"])
+
+    return {
+        "course_id": course_id,
+        "lesson_count": len(final_lessons),
+        "lessons": final_lessons,
+        "node_ids": node_ids,
+    }
+
+
 if __name__ == "__main__":
     print(json.dumps(build_roadmap(), indent=2))

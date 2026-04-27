@@ -32,11 +32,22 @@ export type RoadmapPosition = {
   updated_at?: string
 }
 
+export type RoadmapState = 'completed' | 'active' | 'locked'
+
 export type GeneratedRoadmapConcept = {
   id?: string
   name?: string
   description?: string
-  state?: 'completed' | 'active' | 'locked'
+  state?: RoadmapState
+}
+
+export type GeneratedRoadmapLesson = {
+  lesson_id: string
+  title: string
+  summary?: string
+  lecture_ids?: string[]
+  state: RoadmapState
+  concepts: GeneratedRoadmapConcept[]
 }
 
 export type GeneratedRoadmap = {
@@ -44,6 +55,9 @@ export type GeneratedRoadmap = {
   course_id: string
   current_index?: number
   node_ids: string[]
+  /** Lecture-grouped, LLM-refined lessons (the primary roadmap unit). */
+  lessons?: GeneratedRoadmapLesson[]
+  /** Flat list of concepts (mirrors `node_ids`); kept for legacy consumers. */
   concepts?: GeneratedRoadmapConcept[]
 }
 

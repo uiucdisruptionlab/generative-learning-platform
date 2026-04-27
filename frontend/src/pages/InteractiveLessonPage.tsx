@@ -463,6 +463,10 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
   )
 }
 
+function isSessionGoneError(message: string): boolean {
+  return /session not found/i.test(message)
+}
+
 function normalizePendingWidget(raw: unknown): PendingWidget | null {
   if (!raw || typeof raw !== 'object') return null
   const w = raw as { type?: string; payload?: unknown }
@@ -542,7 +546,12 @@ export default function InteractiveLessonPage() {
         setState({ ...next, pending_widget: normalizePendingWidget(next.pending_widget as unknown) })
         setDraft('')
       } catch (e) {
-        setError(String(e))
+        const msg = String(e)
+        if (isSessionGoneError(msg)) {
+          setError('Your lesson session expired (the backend likely restarted). Reload the page to start a fresh one.')
+        } else {
+          setError(msg)
+        }
       } finally {
         setBusy(false)
       }
@@ -555,9 +564,24 @@ export default function InteractiveLessonPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
+
+    const startFresh = () => startInteractiveLesson(lessonId ?? '', persona, courseOverride)
+
     const load = sessionOverride
-      ? continueInteractiveSession(sessionOverride)
-      : startInteractiveLesson(lessonId, persona, courseOverride)
+      ? continueInteractiveSession(sessionOverride).catch((err) => {
+          if (!isSessionGoneError(String(err))) throw err
+          // The session_id in the URL points at a dead in-memory session
+          // (typically because uvicorn auto-reloaded). Start a fresh one
+          // and swap the stale id out of the URL so refresh works too.
+          return startFresh().then((fresh) => {
+            const next = new URLSearchParams(window.location.search)
+            next.set('session_id', fresh.session_id)
+            window.history.replaceState({}, '', `${window.location.pathname}?${next}`)
+            return fresh
+          })
+        })
+      : startFresh()
+
     load
       .then((s) => {
         if (!cancelled) setState({ ...s, pending_widget: normalizePendingWidget(s.pending_widget) })
@@ -584,14 +608,14 @@ export default function InteractiveLessonPage() {
       title={state?.lesson_title ?? 'Interactive lesson'}
       description="Step-by-step tutor with checks · same sources as the full lesson (readings + YouTube)."
       action={
-        lessonId ? (
-          <Link
-            to={`/lesson/${lessonId}${courseOverride ? `?course=${encodeURIComponent(courseOverride)}` : ''}`}
-            className="text-sm text-primary hover:underline"
-          >
-            Classic lesson view
-          </Link>
-        ) : null
+        <Link
+          to="/roadmap"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-white hover:border-primary/60 hover:text-primary dark:hover:bg-slate-900 transition-colors shadow-sm"
+          aria-label="Exit lesson and return to roadmap"
+        >
+          <span className="material-symbols-outlined text-base">arrow_back</span>
+          Exit lesson
+        </Link>
       }
     >
       <div className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-12 py-6 sm:py-8 pb-32 min-w-0">
@@ -788,9 +812,9 @@ export default function InteractiveLessonPage() {
 
             {state.awaiting === 'none' && (
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                You&apos;re at the end of this walkthrough. Reopen from the roadmap to run it again, or switch to the{' '}
-                <Link className="text-primary underline" to={lessonId ? `/lesson/${lessonId}?course=${courseOverride ?? ''}` : '/roadmap'}>
-                  generated lesson
+                You&apos;re at the end of this walkthrough.{' '}
+                <Link className="text-primary underline" to="/roadmap">
+                  Back to your roadmap
                 </Link>
                 .
               </p>

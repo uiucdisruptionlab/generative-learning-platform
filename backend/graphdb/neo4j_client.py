@@ -109,6 +109,107 @@ def get_concept_roadmap_scoped(course_id: str) -> list[dict]:
     return topo_sort_concept_nodes(concepts, relationships)
 
 
+def get_lecture_grouped_concepts(course_id: str) -> list[dict]:
+    """Course-scoped lectures with their concepts ordered by chunk.order.
+
+    Returns a list of lectures in natural numeric order:
+        [
+            {
+                "lecture_id": "PLec1",
+                "lecture_title": "PLec1",   # raw; refiner rewrites
+                "chunks": [{"chunk_id": "...", "order": 0}, ...],
+                "concepts": [
+                    {"id": "...", "name": "...", "description": "...",
+                     "chunk_id": "...", "chunk_order": 0},
+                    ...,
+                ],
+            },
+            ...,
+        ]
+    """
+    with _driver() as driver:
+        records, _, _ = driver.execute_query(
+            """
+            MATCH (co:Course {id: $course_id})-[:HAS_LECTURE]->(l:Lecture)
+                  -[:HAS_CHUNK]->(ch:Chunk)-[:CONTAINS]->(c:Concept)
+            RETURN l.id AS lecture_id,
+                   l.title AS lecture_title,
+                   ch.id AS chunk_id,
+                   coalesce(ch.order, 0) AS chunk_order,
+                   coalesce(c.id, c.name) AS concept_id,
+                   c.name AS concept_name,
+                   c.description AS concept_description
+            """,
+            course_id=course_id,
+            database_=_DATABASE,
+        )
+
+    lectures: dict[str, dict] = {}
+    for r in records:
+        lid = str(r["lecture_id"] or "")
+        if not lid:
+            continue
+        cid = str(r["concept_id"] or "")
+        if not cid:
+            continue
+        lec = lectures.setdefault(
+            lid,
+            {
+                "lecture_id": lid,
+                "lecture_title": r["lecture_title"] or lid,
+                "_concepts_by_id": {},
+                "_chunks": {},
+            },
+        )
+        ch_id = str(r["chunk_id"] or "")
+        ch_order = int(r["chunk_order"] or 0)
+        if ch_id:
+            lec["_chunks"][ch_id] = ch_order
+        if cid not in lec["_concepts_by_id"]:
+            lec["_concepts_by_id"][cid] = {
+                "id": cid,
+                "name": r["concept_name"] or cid,
+                "description": r["concept_description"] or "",
+                "chunk_id": ch_id,
+                "chunk_order": ch_order,
+            }
+        else:
+            existing = lec["_concepts_by_id"][cid]
+            if ch_order < int(existing["chunk_order"]):
+                existing["chunk_id"] = ch_id
+                existing["chunk_order"] = ch_order
+
+    out: list[dict] = []
+    for lid, lec in lectures.items():
+        chunks_sorted = sorted(
+            ({"chunk_id": cid, "order": order} for cid, order in lec["_chunks"].items()),
+            key=lambda c: (int(c["order"]), str(c["chunk_id"])),
+        )
+        concepts_sorted = sorted(
+            lec["_concepts_by_id"].values(),
+            key=lambda c: (int(c["chunk_order"]), str(c["name"]).lower()),
+        )
+        out.append(
+            {
+                "lecture_id": lec["lecture_id"],
+                "lecture_title": lec["lecture_title"],
+                "chunks": chunks_sorted,
+                "concepts": concepts_sorted,
+            }
+        )
+
+    out.sort(key=lambda lec: _lecture_sort_key(lec["lecture_id"]))
+    return out
+
+
+def _lecture_sort_key(lecture_id: str) -> tuple:
+    """Natural sort: PLec1 < PLec2 < PLec10, ALecFinal < ALec_b, etc."""
+    import re
+
+    parts = re.findall(r"\d+|\D+", str(lecture_id))
+    return tuple((1, int(p)) if p.isdigit() else (0, p.lower()) for p in parts)
+
+
 def get_concept_roadmap(course_id: str | None = None) -> list[dict]:
     keys = _course_keys(course_id)
     if keys:

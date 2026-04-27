@@ -4,30 +4,36 @@ import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 import { usePersona } from '../contexts/PersonaContext'
-import { fetchStudentRoadmapData, startSession, type GeneratedRoadmapConcept } from '../api/home'
+import {
+  fetchStudentRoadmapData,
+  startSession,
+  type GeneratedRoadmap,
+  type GeneratedRoadmapLesson,
+  type RoadmapState,
+} from '../api/home'
 
 type RoadmapData = Awaited<ReturnType<typeof fetchStudentRoadmapData>>
 
-function conceptTitle(nodeId: string, concepts: GeneratedRoadmapConcept[] = []): string {
-  const found = concepts.find((concept) => concept.id === nodeId || concept.name === nodeId)
-  return found?.name || found?.id || nodeId
+function stateToStatus(state: RoadmapState): HomeRoadmapOutcome['status'] {
+  if (state === 'completed') return 'completed'
+  if (state === 'active') return 'current'
+  return 'upcoming'
 }
 
-function conceptDescription(nodeId: string, concepts: GeneratedRoadmapConcept[] = []): string | undefined {
-  const found = concepts.find((concept) => concept.id === nodeId || concept.name === nodeId)
-  return found?.description
+function lessonSubtext(lesson: GeneratedRoadmapLesson): string | undefined {
+  if (lesson.summary && lesson.summary.trim()) return lesson.summary
+  const count = lesson.concepts?.length ?? 0
+  if (!count) return undefined
+  return `${count} concept${count === 1 ? '' : 's'}`
 }
 
-function makeOutcomes(
-  nodeIds: string[],
-  concepts: GeneratedRoadmapConcept[] | undefined,
-  currentIndex: number,
-): HomeRoadmapOutcome[] {
-  return nodeIds.map((nodeId, index) => ({
-    id: nodeId,
-    title: conceptTitle(nodeId, concepts),
-    status: index < currentIndex ? 'completed' : index === currentIndex ? 'current' : 'upcoming',
-    subtext: conceptDescription(nodeId, concepts),
+function makeLessonOutcomes(roadmap: GeneratedRoadmap | undefined): HomeRoadmapOutcome[] {
+  const lessons = roadmap?.lessons ?? []
+  return lessons.map((lesson) => ({
+    id: lesson.lesson_id,
+    title: lesson.title,
+    status: stateToStatus(lesson.state),
+    subtext: lessonSubtext(lesson),
   }))
 }
 
@@ -60,15 +66,13 @@ export default function RoadmapPage() {
     }
   }, [studentId])
 
-  const currentIndex = data?.roadmapPosition.current_index ?? 0
-  const nodeIds = data?.roadmap.node_ids ?? []
-  const outcomes = useMemo(
-    () => makeOutcomes(nodeIds, data?.roadmap.concepts, currentIndex),
-    [nodeIds, data?.roadmap.concepts, currentIndex],
+  const outcomes = useMemo(() => makeLessonOutcomes(data?.roadmap), [data?.roadmap])
+  const activeLesson = useMemo(
+    () => (data?.roadmap.lessons ?? []).find((lesson) => lesson.state === 'active'),
+    [data?.roadmap.lessons],
   )
-  const activeNodeId = nodeIds[Math.min(Math.max(currentIndex, 0), Math.max(nodeIds.length - 1, 0))]
   const title = data?.student.learning_goals?.target_course || data?.student.learning_goals?.primary_focus || 'Roadmap'
-  const description = `${outcomes.length} learning outcomes · Personalized for you`
+  const description = `${outcomes.length} lesson${outcomes.length === 1 ? '' : 's'} · Personalized for you`
 
   const handleStartHere = async (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault()
@@ -103,7 +107,7 @@ export default function RoadmapPage() {
         ) : (
           <LearningRoadmap
             outcomes={outcomes.length ? outcomes : []}
-            startHereTo={activeNodeId ? `/lesson/${activeNodeId}/interactive` : '#'}
+            startHereTo={activeLesson ? `/lesson?lesson_id=${encodeURIComponent(activeLesson.lesson_id)}` : '#'}
             onStartHere={handleStartHere}
           />
         )}

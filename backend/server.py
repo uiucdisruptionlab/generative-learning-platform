@@ -347,6 +347,49 @@ def _save_roadmap_cache(course: str, data: dict) -> None:
         data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+# ---------------------------------------------------------------------------
+# Lesson roadmap cache (lecture-grouped + LLM-refined; per Neo4j Course.id).
+# Separate file family so it never clashes with the legacy `/roadmap?course=`
+# cache, which uses different shape and different course-key conventions.
+# ---------------------------------------------------------------------------
+
+
+def _lesson_roadmap_cache_path(course_id: str) -> Path:
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in str(course_id))
+    return ROADMAP_CACHE_DIR / f"lesson_roadmap_cache_{safe}.json"
+
+
+def _load_lesson_roadmap_cache(course_id: str) -> dict | None:
+    path = _lesson_roadmap_cache_path(course_id)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return None
+
+
+def _save_lesson_roadmap_cache(course_id: str, data: dict) -> None:
+    _lesson_roadmap_cache_path(course_id).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _get_or_build_lesson_roadmap(course_id: str, force_refresh: bool = False) -> dict:
+    """Return the cached lecture-grouped lesson roadmap for a course, building it if missing."""
+    if not force_refresh:
+        cached = _load_lesson_roadmap_cache(course_id)
+        if cached and cached.get("lessons"):
+            return cached
+    from graphdb.roadmap_builder import build_course_lesson_roadmap
+
+    fresh = build_course_lesson_roadmap(course_id, refine_with_llm=True)
+    if fresh.get("lessons"):
+        _save_lesson_roadmap_cache(course_id, fresh)
+    return fresh
+
+
 def _course_from_student(student: dict[str, Any]) -> str:
     goals = student.get("learning_goals") or {}
     if not isinstance(goals, dict):
@@ -783,14 +826,31 @@ def get_student_roadmap_position(student_id: str) -> dict[str, Any]:
 
 @app.get("/roadmap/generate/{student_id}")
 def generate_student_roadmap(student_id: str) -> dict[str, Any]:
-    from graphdb.neo4j_client import get_concept_roadmap_scoped
+    """Lecture-grouped, LLM-refined roadmap with per-lesson and per-concept state.
+
+    Response shape:
+        {
+            "student_id", "course_id", "current_index",
+            "node_ids": [concept_id, ...],         # flat ordered concepts
+            "lessons": [
+                {
+                    "lesson_id", "title", "summary", "state",
+                    "concepts": [
+                        {"id", "name", "description", "state"}, ...
+                    ],
+                },
+                ...
+            ],
+            # `concepts` mirrors `node_ids` for legacy clients that haven't been updated yet.
+            "concepts": [{"id", "name", "description", "state"}, ...],
+        }
+    """
     from srs import get_roadmap_position
     from supabase_local import get_supabase_client
 
     try:
         supabase = get_supabase_client()
 
-        # look up enrolled course from student_courses
         sc_resp = (
             supabase.table("student_courses")
             .select("course_id")
@@ -803,33 +863,66 @@ def generate_student_roadmap(student_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="no course enrollment found for student")
         course_id = str(sc_rows[0]["course_id"])
 
-        concepts = get_concept_roadmap_scoped(course_id)
+        roadmap = _get_or_build_lesson_roadmap(course_id)
+        lessons = roadmap.get("lessons") or []
+        node_ids: list[str] = list(roadmap.get("node_ids") or [])
 
         position = get_roadmap_position(student_id, course_id=course_id, client=supabase)
         current_index = int(position.get("current_index") or 0)
+        if node_ids:
+            current_index = max(0, min(current_index, len(node_ids) - 1))
 
-        enriched = []
-        for i, c in enumerate(concepts):
-            if i < current_index:
-                state = "completed"
-            elif i == current_index:
-                state = "active"
+        enriched_lessons: list[dict[str, Any]] = []
+        flat_concepts: list[dict[str, Any]] = []
+        flat_idx = 0
+        for lesson in lessons:
+            lesson_concepts = lesson.get("concepts") or []
+            lesson_concept_count = len(lesson_concepts)
+            if not lesson_concept_count:
+                continue
+            lesson_start = flat_idx
+            lesson_end = flat_idx + lesson_concept_count - 1
+            if current_index < lesson_start:
+                lesson_state = "locked"
+            elif current_index > lesson_end:
+                lesson_state = "completed"
             else:
-                state = "locked"
-            enriched.append({
-                "id": str(c.get("id") or c.get("name") or ""),
-                "name": c.get("name") or "",
-                "description": c.get("description") or "",
-                "state": state,
+                lesson_state = "active"
+
+            ec: list[dict[str, Any]] = []
+            for c in lesson_concepts:
+                if flat_idx < current_index:
+                    state = "completed"
+                elif flat_idx == current_index:
+                    state = "active"
+                else:
+                    state = "locked"
+                concept_dict = {
+                    "id": str(c.get("id") or ""),
+                    "name": c.get("name") or "",
+                    "description": c.get("description") or "",
+                    "state": state,
+                }
+                ec.append(concept_dict)
+                flat_concepts.append(concept_dict)
+                flat_idx += 1
+
+            enriched_lessons.append({
+                "lesson_id": str(lesson.get("lesson_id") or ""),
+                "title": str(lesson.get("title") or ""),
+                "summary": str(lesson.get("summary") or ""),
+                "lecture_ids": list(lesson.get("lecture_ids") or []),
+                "state": lesson_state,
+                "concepts": ec,
             })
 
-        node_ids = [c["id"] for c in enriched]
         return {
             "student_id": student_id,
             "course_id": course_id,
             "current_index": current_index,
             "node_ids": node_ids,
-            "concepts": enriched,
+            "lessons": enriched_lessons,
+            "concepts": flat_concepts,
         }
     except HTTPException:
         raise
@@ -843,6 +936,35 @@ def generate_student_roadmap(student_id: str) -> dict[str, Any]:
 @app.get("/roadmap/{student_id}")
 def get_student_roadmap(student_id: str) -> dict[str, Any]:
     return generate_student_roadmap(student_id)
+
+
+@app.post("/roadmap/{student_id}/rebuild")
+def rebuild_student_lesson_roadmap(student_id: str) -> dict[str, Any]:
+    """Force a fresh LLM-refined lesson roadmap rebuild for the student's enrolled course."""
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        sc_rows = sc_resp.data or []
+        if not sc_rows:
+            raise HTTPException(status_code=404, detail="no course enrollment found for student")
+        course_id = str(sc_rows[0]["course_id"])
+        _get_or_build_lesson_roadmap(course_id, force_refresh=True)
+        return generate_student_roadmap(student_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/courses")

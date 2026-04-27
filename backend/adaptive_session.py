@@ -18,9 +18,11 @@ from srs import (
 )
 from supabase_local import get_student_profile, get_supabase_client
 
-MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
+MODEL_ID = os.getenv("BEDROCK_MODEL_ID",
+                     "anthropic.claude-3-haiku-20240307-v1:0")
 FAST_MODEL_ID = os.getenv("BEDROCK_FAST_MODEL_ID", MODEL_ID)
-AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+AWS_REGION = os.getenv("AWS_REGION", os.getenv(
+    "AWS_DEFAULT_REGION", "us-east-1"))
 
 BLOCKS_PER_CONCEPT = 3
 SESSION_STORE: dict[str, dict[str, Any]] = {}
@@ -32,7 +34,8 @@ Intent = Literal["question", "attempt", "done"]
 def _prune_sessions() -> None:
     if len(SESSION_STORE) <= _SESSION_MAX:
         return
-    oldest = sorted(SESSION_STORE.items(), key=lambda item: item[1].get("created_at", 0))
+    oldest = sorted(SESSION_STORE.items(),
+                    key=lambda item: item[1].get("created_at", 0))
     for session_id, _ in oldest[: max(0, len(SESSION_STORE) - _SESSION_MAX + 20)]:
         SESSION_STORE.pop(session_id, None)
 
@@ -50,10 +53,50 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     try:
         parsed = json.loads(match.group(0))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Model returned malformed JSON: {text[:500]}") from exc
+        raise ValueError(
+            f"Model returned malformed JSON: {text[:500]}") from exc
     if not isinstance(parsed, dict):
         raise ValueError("Model JSON was not an object")
     return parsed
+
+
+def _resolve_video_block(search_query: str, why: str) -> dict[str, Any]:
+    """Resolve a YouTube search query into a concrete video for the frontend.
+
+    The frontend needs `url`, `title`, `channel`, and `thumbnail` to render an
+    embedded player. If YOUTUBE_API_KEY is missing or the search fails, those
+    fields are returned empty and the UI will fall back to a text prompt.
+    """
+    base = {
+        "search_query": search_query,
+        "search_query_used": search_query,
+        "why": why,
+        "url": "",
+        "title": "",
+        "channel": "",
+        "thumbnail": "",
+    }
+    try:
+        from youtube.client import search_videos
+
+        results = search_videos(search_query, max_results=1)
+    except Exception as exc:
+        print(f"[adaptive_session] YouTube lookup failed: {exc}")
+        return base
+
+    if not results:
+        return base
+
+    top = results[0]
+    base.update(
+        {
+            "url": str(top.get("url") or ""),
+            "title": str(top.get("title") or ""),
+            "channel": str(top.get("channel") or ""),
+            "thumbnail": str(top.get("thumbnail") or ""),
+        }
+    )
+    return base
 
 
 def _normalize_block_content(
@@ -65,10 +108,11 @@ def _normalize_block_content(
     concept = _concept_for(session, session["node_id"])
     concept_name = str(concept.get("name") or concept.get("id"))
     if block_type == "video":
-        return {
-            "search_query": str(content.get("search_query") or f"{concept_name} tutorial"),
-            "why": str(content.get("why") or f"This video search can help reinforce {concept_name}."),
-        }
+        search_query = str(content.get("search_query")
+                           or f"{concept_name} tutorial")
+        why = str(content.get("why")
+                  or f"This video search can help reinforce {concept_name}.")
+        return _resolve_video_block(search_query, why)
     if block_type == "flashcard":
         return {
             "front": str(content.get("front") or concept_name),
@@ -111,10 +155,10 @@ def _fallback_block_content(
     concept_name = str(concept.get("name") or concept.get("id"))
     cleaned = response_text.strip()
     if block_type == "video":
-        return {
-            "search_query": f"{concept_name} tutorial",
-            "why": cleaned[:240] or f"This search should help reinforce {concept_name}.",
-        }
+        search_query = f"{concept_name} tutorial"
+        why = cleaned[:
+                      240] or f"This search should help reinforce {concept_name}."
+        return _resolve_video_block(search_query, why)
     if block_type == "flashcard":
         return {
             "front": concept_name,
@@ -190,7 +234,8 @@ def _concept_for(session: dict[str, Any], node_id: str) -> dict[str, Any]:
 
 
 def _source_text(chunks: list[dict[str, Any]]) -> str:
-    text = "\n\n".join(str(chunk.get("text") or "").strip() for chunk in chunks if chunk.get("text"))
+    text = "\n\n".join(str(chunk.get("text") or "").strip()
+                       for chunk in chunks if chunk.get("text"))
     return text or "No source excerpts were found for this concept."
 
 
@@ -258,7 +303,8 @@ Do NOT repeat or regenerate any of the above. Move forward.
 def _block_task(session: dict[str, Any], block_type: str) -> str:
     concept = _concept_for(session, session["node_id"])
     concept_name = str(concept.get("name") or concept.get("id"))
-    confidence = _profile_value(session["student"], "subject_confidence", "unknown")
+    confidence = _profile_value(
+        session["student"], "subject_confidence", "unknown")
     if block_type == "video":
         return f"""Suggest a YouTube search query for a video that would help a {confidence}
 student understand {concept_name}.
@@ -322,18 +368,45 @@ def start_session(student_id: str, course: str | None = None) -> dict[str, Any]:
     )
     sc_rows = sc_response.data or []
     if not sc_rows:
-        raise ValueError(f"No course enrollment found for student '{student_id}'")
+        raise ValueError(
+            f"No course enrollment found for student '{student_id}'")
     course_id = str(sc_rows[0]["course_id"])
 
-    # Step 5: scoped topo sort query for this course
-    concepts = get_concept_roadmap_scoped(course_id)
-    node_ids = [str(concept["id"]) for concept in concepts]
+    # Step 5: pull the cached lecture-grouped lesson roadmap so the lesson loop
+    # walks concepts in the same order the student-facing roadmap renders them.
+    # Falls back to the raw topo sort if the cache hasn't been built yet.
+    concepts: list[dict] = []
+    node_ids: list[str] = []
+    try:
+        from server import _get_or_build_lesson_roadmap
+
+        roadmap = _get_or_build_lesson_roadmap(course_id)
+        for lesson in roadmap.get("lessons") or []:
+            for c in lesson.get("concepts") or []:
+                cid = str(c.get("id") or "")
+                if not cid:
+                    continue
+                concepts.append({
+                    "id": cid,
+                    "name": c.get("name") or cid,
+                    "description": c.get("description") or "",
+                })
+                node_ids.append(cid)
+    except Exception as exc:
+        print(f"[adaptive_session] lesson roadmap unavailable for {course_id!r}: {exc}; falling back to raw topo sort")
+
     if not node_ids:
-        raise RuntimeError(f"No concepts found in Neo4j for course '{course_id}'")
+        concepts = get_concept_roadmap_scoped(course_id)
+        node_ids = [str(concept["id"]) for concept in concepts]
+    if not node_ids:
+        raise RuntimeError(
+            f"No concepts found in Neo4j for course '{course_id}'")
 
     # Step 6: roadmap_position scoped to (student_id, course_id)
-    position = get_roadmap_position(student_id, course_id=course_id, client=supabase)
-    current_index = min(max(0, int(position.get("current_index") or 0)), len(node_ids) - 1)
+    position = get_roadmap_position(
+        student_id, course_id=course_id, client=supabase)
+    current_index = min(
+        max(0, int(position.get("current_index") or 0)), len(node_ids) - 1)
 
     # Only consider SRS reviews whose concept is in the current course's node_ids.
     # Otherwise stale rows from other courses would hijack the active concept.
@@ -389,7 +462,8 @@ def generate_block(session_id: str) -> dict[str, Any]:
         return {"action": "knowledge_check", **_public_session(session)}
 
     block_type = _next_block_type(session)
-    trigger = {"role": "user", "content": f"Generate a {block_type} for this concept."}
+    trigger = {"role": "user",
+               "content": f"Generate a {block_type} for this concept."}
     response_text = _call_converse(
         _system_prompt(session, _block_task(session, block_type)),
         session["messages"] + [trigger],
@@ -402,7 +476,8 @@ def generate_block(session_id: str) -> dict[str, Any]:
             session=session,
         )
     except ValueError:
-        parsed = _fallback_block_content(block_type, response_text, session=session)
+        parsed = _fallback_block_content(
+            block_type, response_text, session=session)
     session["messages"].append(trigger)
     session["messages"].append({"role": "assistant", "content": response_text})
     session["blocks_delivered"].append(block_type)
@@ -446,7 +521,8 @@ Reply with only the single word: question, attempt, or done. No punctuation, no 
         temperature=0,
         max_tokens=10,
     ).strip().lower()
-    return raw if raw in {"question", "attempt", "done"} else "attempt"  # type: ignore[return-value]
+    # type: ignore[return-value]
+    return raw if raw in {"question", "attempt", "done"} else "attempt"
 
 
 def lesson_message(session_id: str, message: str | None = None) -> dict[str, Any]:
@@ -459,20 +535,22 @@ def lesson_message(session_id: str, message: str | None = None) -> dict[str, Any
     if not message or not message.strip():
         task = f"""All content blocks for this concept have been delivered.
 Ask the student one open-ended question to check their understanding of {concept_name}.
-The question must be specific to the source material, not a generic comprehension check.
-Do not ask a multiple choice question. Ask something that requires them to explain in their own words.
+The question must be specific to the source material, not a generic comprehension check. Do not let it be a mcq, flashcard type question, or anything. Ask something that helps you evaluate their understanding.
 Keep the question concise."""
         trigger = {"role": "user", "content": "Start the knowledge check."}
-        reply = _call_converse(_system_prompt(session, task), session["messages"] + [trigger], max_tokens=500)
+        reply = _call_converse(_system_prompt(
+            session, task), session["messages"] + [trigger], max_tokens=500)
         session["messages"].append(trigger)
         session["messages"].append({"role": "assistant", "content": reply})
-        session["transcript"].append({"role": "assistant", "content": reply, "meta": {"kind": "knowledge_check"}})
+        session["transcript"].append(
+            {"role": "assistant", "content": reply, "meta": {"kind": "knowledge_check"}})
         session["knowledge_opened"] = True
         return {"action": "knowledge_check", "reply": reply, **_public_session(session)}
 
     user_text = message.strip()
     session["messages"].append({"role": "user", "content": user_text})
-    session["transcript"].append({"role": "user", "content": user_text, "meta": {}})
+    session["transcript"].append(
+        {"role": "user", "content": user_text, "meta": {}})
     intent = classify_intent(user_text, concept_name)
     if intent == "done":
         return {"action": "complete", "intent": intent, **_public_session(session)}
@@ -492,9 +570,11 @@ Do not repeat content already covered. Build on what they said."""
         if session["attempt_count"] >= 3:
             task += "\nIf they still have not shown mastery, suggest revisiting the most relevant prerequisite and do not advance."
 
-    reply = _call_converse(_system_prompt(session, task), session["messages"], max_tokens=800)
+    reply = _call_converse(_system_prompt(session, task),
+                           session["messages"], max_tokens=800)
     session["messages"].append({"role": "assistant", "content": reply})
-    session["transcript"].append({"role": "assistant", "content": reply, "meta": {"kind": "knowledge_check", "intent": intent}})
+    session["transcript"].append({"role": "assistant", "content": reply, "meta": {
+                                 "kind": "knowledge_check", "intent": intent}})
     return {"action": "reply", "intent": intent, "reply": reply, **_public_session(session)}
 
 
@@ -509,7 +589,8 @@ Read the full conversation and score the student's demonstrated understanding fr
 4: Solid understanding, minor gaps
 5: Strong understanding, could explain it to someone else
 Return JSON only, no other text: {"score": N}"""
-    raw = _call_converse(system, session["messages"], model_id=FAST_MODEL_ID, temperature=0, max_tokens=30)
+    raw = _call_converse(
+        system, session["messages"], model_id=FAST_MODEL_ID, temperature=0, max_tokens=30)
     score = max(0, min(5, int(_parse_json_object(raw).get("score", 0))))
     supabase = get_supabase_client()
     srs_record = upsert_srs_record(
