@@ -68,6 +68,59 @@ def _extract_text_from_converse_response(response: dict[str, Any]) -> str:
     ).strip()
 
 
+def _salvage_truncated_lessons_json(raw: str) -> dict[str, Any] | None:
+    """Best-effort recovery from JSON truncated mid-lesson.
+
+    Claude Haiku's max output is 4096 tokens. On dense roadmaps the response
+    runs over and gets cut off in the middle of a lesson, breaking strict JSON
+    parsing. This walks the response, finds the last balanced lesson object
+    inside the `lessons` array, and reconstructs valid JSON ending there.
+    Returns None if it can't find at least one complete lesson.
+    """
+    start = raw.find("{")
+    if start < 0:
+        return None
+    raw = raw[start:]
+
+    lessons_match = re.search(r'"lessons"\s*:\s*\[', raw)
+    if not lessons_match:
+        return None
+    array_start = lessons_match.end()
+
+    depth = 0
+    in_string = False
+    escape = False
+    last_complete_end = -1
+    for i in range(array_start, len(raw)):
+        ch = raw[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                last_complete_end = i
+
+    if last_complete_end < 0:
+        return None
+
+    salvaged = raw[: last_complete_end + 1] + "]}"
+    try:
+        return json.loads(salvaged)
+    except json.JSONDecodeError:
+        return None
+
+
 def _parse_llm_json(raw_text: str) -> dict[str, Any]:
     raw_text = raw_text.strip()
     try:
@@ -77,21 +130,20 @@ def _parse_llm_json(raw_text: str) -> dict[str, Any]:
 
     fenced_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw_text, flags=re.DOTALL)
     if fenced_match:
-        raw_text = fenced_match.group(1).strip()
+        candidate = fenced_match.group(1).strip()
         try:
-            return json.loads(raw_text)
+            return json.loads(candidate)
         except json.JSONDecodeError:
             pass
 
     match = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON object found in model response: {raw_text}")
+    candidate = match.group(0) if match else raw_text
 
-    candidate = match.group(0)
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
+    if match:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
 
     def _escape_string(m: re.Match[str]) -> str:
         inner = m.group(1)
@@ -105,8 +157,18 @@ def _parse_llm_json(raw_text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
-    return json.loads(cleaned)
+    cleaned_no_trailing = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    try:
+        return json.loads(cleaned_no_trailing)
+    except json.JSONDecodeError:
+        pass
+
+    salvaged = _salvage_truncated_lessons_json(raw_text)
+    if salvaged is not None:
+        print(f"[roadmap_refiner] Salvaged truncated response with {len(salvaged.get('lessons', []))} lessons")
+        return salvaged
+
+    raise ValueError(f"Could not parse model response as JSON. First 200 chars: {raw_text[:200]!r}")
 
 
 def _normalize_refined_roadmap(refined: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
@@ -155,7 +217,10 @@ def _normalize_refined_roadmap(refined: dict[str, Any], fallback: dict[str, Any]
     }
 
 
-MAX_LESSONS_FOR_REFINEMENT = 20
+# Claude 3 Haiku's max output is 4096 tokens. Dense roadmaps with concept-rich
+# lessons easily blow past that and the response gets truncated mid-lesson.
+# Cap input lessons to a count Haiku can reliably finish JSON for.
+MAX_LESSONS_FOR_REFINEMENT = 12
 
 
 def _truncate_roadmap(roadmap: dict[str, Any]) -> dict[str, Any]:

@@ -380,7 +380,7 @@ def start_session(student_id: str, course: str | None = None) -> dict[str, Any]:
     try:
         from server import _get_or_build_lesson_roadmap
 
-        roadmap = _get_or_build_lesson_roadmap(course_id)
+        roadmap = _get_or_build_lesson_roadmap(student_id, course_id)
         for lesson in roadmap.get("lessons") or []:
             for c in lesson.get("concepts") or []:
                 cid = str(c.get("id") or "")
@@ -582,16 +582,44 @@ def complete_lesson(session_id: str) -> dict[str, Any]:
     session = SESSION_STORE.get(session_id)
     if not session:
         raise KeyError(session_id)
-    system = """You are evaluating a student's understanding of a concept based on a tutoring conversation.
-Read the full conversation and score the student's demonstrated understanding from 0 to 5:
+    concept = _concept_for(session, session["node_id"])
+    concept_name = str(concept.get("name") or concept.get("id"))
+    system = """You are an automated grader. You receive a transcript of a tutoring conversation and produce a score.
+You are NOT addressing the student. You are NOT continuing the conversation. Do not greet, acknowledge, or explain.
+Score the student's demonstrated understanding of the concept from 0 to 5 based ONLY on what the student wrote:
 0-2: Does not understand the concept
 3: Basic understanding, some gaps remain
 4: Solid understanding, minor gaps
 5: Strong understanding, could explain it to someone else
-Return JSON only, no other text: {"score": N}"""
+Return ONE JSON object and nothing else. Schema: {"score": <integer 0-5>}"""
+    transcript_lines = [
+        f"{m.get('role', '?')}: {m.get('content', '')}"
+        for m in session.get("messages", [])
+        if m.get("role") in {"user", "assistant"} and m.get("content")
+    ]
+    transcript = "\n".join(transcript_lines) or "(no conversation recorded)"
+    grading_prompt = (
+        f"Concept: {concept_name}\n\n"
+        f"Transcript:\n{transcript}\n\n"
+        "Return the score JSON now."
+    )
     raw = _call_converse(
-        system, session["messages"], model_id=FAST_MODEL_ID, temperature=0, max_tokens=30)
-    score = max(0, min(5, int(_parse_json_object(raw).get("score", 0))))
+        system,
+        [{"role": "user", "content": grading_prompt}],
+        model_id=FAST_MODEL_ID,
+        temperature=0,
+        max_tokens=64,
+    )
+    try:
+        score = max(0, min(5, int(_parse_json_object(raw).get("score", 0))))
+    except (ValueError, TypeError):
+        # Fall back to scanning for a 0-5 digit instead of 500-ing the lesson.
+        digit_match = re.search(r"\b([0-5])\b", raw)
+        score = int(digit_match.group(1)) if digit_match else 0
+        print(
+            f"[adaptive_session] complete_lesson scoring fell back to regex; "
+            f"score={score}, raw={raw!r}"
+        )
     supabase = get_supabase_client()
     srs_record = upsert_srs_record(
         student_id=session["student"]["id"],

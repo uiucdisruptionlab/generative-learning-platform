@@ -348,45 +348,79 @@ def _save_roadmap_cache(course: str, data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Lesson roadmap cache (lecture-grouped + LLM-refined; per Neo4j Course.id).
-# Separate file family so it never clashes with the legacy `/roadmap?course=`
-# cache, which uses different shape and different course-key conventions.
+# Lesson roadmap cache (lecture-grouped + LLM-refined). Stored in the existing
+# Supabase `roadmap_cache` table, keyed by student_id (one course per student
+# is currently assumed, so per-student caching is equivalent to per-course).
 # ---------------------------------------------------------------------------
 
 
-def _lesson_roadmap_cache_path(course_id: str) -> Path:
-    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in str(course_id))
-    return ROADMAP_CACHE_DIR / f"lesson_roadmap_cache_{safe}.json"
+def _load_lesson_roadmap_cache(student_id: str) -> dict | None:
+    """Load the cached lesson roadmap for a student from `roadmap_cache`."""
+    try:
+        from supabase_local import get_supabase_client
+
+        supabase = get_supabase_client()
+        resp = (
+            supabase.table("roadmap_cache")
+            .select("roadmap")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            return None
+        roadmap = rows[0].get("roadmap")
+        if isinstance(roadmap, str):
+            try:
+                roadmap = json.loads(roadmap)
+            except Exception:
+                return None
+        # Only treat as a valid lesson roadmap if it has the new shape.
+        if isinstance(roadmap, dict) and roadmap.get("lessons"):
+            return roadmap
+        return None
+    except Exception as exc:
+        print(f"[server] failed to read roadmap_cache for student {student_id!r}: {exc}")
+        return None
 
 
-def _load_lesson_roadmap_cache(course_id: str) -> dict | None:
-    path = _lesson_roadmap_cache_path(course_id)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return None
+def _save_lesson_roadmap_cache(student_id: str, data: dict) -> None:
+    """Upsert the cached lesson roadmap for a student into `roadmap_cache`."""
+    try:
+        from supabase_local import get_supabase_client
+
+        supabase = get_supabase_client()
+        row = {
+            "student_id": student_id,
+            "roadmap": data,
+        }
+        supabase.table("roadmap_cache").upsert(
+            row, on_conflict="student_id"
+        ).execute()
+    except Exception as exc:
+        print(f"[server] failed to write roadmap_cache for student {student_id!r}: {exc}")
 
 
-def _save_lesson_roadmap_cache(course_id: str, data: dict) -> None:
-    _lesson_roadmap_cache_path(course_id).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+def _get_or_build_lesson_roadmap(
+    student_id: str,
+    course_id: str,
+    force_refresh: bool = False,
+) -> dict:
+    """Return the cached lesson roadmap for a student, building it if missing.
 
-
-def _get_or_build_lesson_roadmap(course_id: str, force_refresh: bool = False) -> dict:
-    """Return the cached lecture-grouped lesson roadmap for a course, building it if missing."""
+    `student_id` is the cache key; `course_id` is what the builder runs against.
+    Assumes one course per student.
+    """
     if not force_refresh:
-        cached = _load_lesson_roadmap_cache(course_id)
-        if cached and cached.get("lessons"):
+        cached = _load_lesson_roadmap_cache(student_id)
+        if cached and cached.get("lessons") and cached.get("course_id") == course_id:
             return cached
     from graphdb.roadmap_builder import build_course_lesson_roadmap
 
     fresh = build_course_lesson_roadmap(course_id, refine_with_llm=True)
     if fresh.get("lessons"):
-        _save_lesson_roadmap_cache(course_id, fresh)
+        _save_lesson_roadmap_cache(student_id, fresh)
     return fresh
 
 
@@ -863,7 +897,7 @@ def generate_student_roadmap(student_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="no course enrollment found for student")
         course_id = str(sc_rows[0]["course_id"])
 
-        roadmap = _get_or_build_lesson_roadmap(course_id)
+        roadmap = _get_or_build_lesson_roadmap(student_id, course_id)
         lessons = roadmap.get("lessons") or []
         node_ids: list[str] = list(roadmap.get("node_ids") or [])
 
@@ -956,7 +990,7 @@ def rebuild_student_lesson_roadmap(student_id: str) -> dict[str, Any]:
         if not sc_rows:
             raise HTTPException(status_code=404, detail="no course enrollment found for student")
         course_id = str(sc_rows[0]["course_id"])
-        _get_or_build_lesson_roadmap(course_id, force_refresh=True)
+        _get_or_build_lesson_roadmap(student_id, course_id, force_refresh=True)
         return generate_student_roadmap(student_id)
     except HTTPException:
         raise

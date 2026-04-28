@@ -2,40 +2,6 @@ import { Link } from 'react-router-dom'
 import { MouseEvent, useEffect, useRef } from 'react'
 import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 
-const DEFAULT_OUTCOMES: HomeRoadmapOutcome[] = [
-  {
-    id: '1',
-    title: 'Reading a Financial Statement',
-    status: 'completed',
-  },
-  {
-    id: '2',
-    title: 'The Income Statement',
-    status: 'current',
-    subtext: 'Based on your background, this is the right place to start.',
-  },
-  {
-    id: '3',
-    title: 'The Balance Sheet',
-    status: 'upcoming',
-  },
-  {
-    id: '4',
-    title: 'Cash Flow Basics',
-    status: 'upcoming',
-  },
-  {
-    id: '5',
-    title: 'Ratio Analysis',
-    status: 'upcoming',
-  },
-  {
-    id: '6',
-    title: 'Interpreting Performance',
-    status: 'upcoming',
-  },
-]
-
 type LearningRoadmapProps = {
   compact?: boolean
   showViewFullLink?: boolean
@@ -52,11 +18,11 @@ export default function LearningRoadmap({
   showViewFullLink,
   scrollable,
   outcomes: outcomesProp,
-  startHereTo = '/module/income-statement',
+  startHereTo = '#',
   viewFullTo = '/roadmap',
   onStartHere,
 }: LearningRoadmapProps) {
-  const outcomes = outcomesProp ?? DEFAULT_OUTCOMES
+  const outcomes = outcomesProp ?? []
   const currentItemRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -66,6 +32,18 @@ export default function LearningRoadmap({
     })
     return () => cancelAnimationFrame(id)
   }, [scrollable, outcomes])
+
+  const empty = (
+    <div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-slate-400 dark:text-slate-500">
+      <span className="material-symbols-outlined text-3xl text-primary/60">route</span>
+      <p className={`font-semibold ${compact ? 'text-sm' : 'text-base'} text-slate-500 dark:text-slate-400`}>
+        Your roadmap is being prepared.
+      </p>
+      <p className="text-xs text-slate-400 dark:text-slate-500">
+        Check back in a moment, or rebuild it from your profile.
+      </p>
+    </div>
+  )
 
   const list = (
     <div className="relative pl-1">
@@ -127,14 +105,16 @@ export default function LearningRoadmap({
     </div>
   )
 
+  const body = outcomes.length === 0 ? empty : list
+
   return (
     <div>
       {scrollable ? (
         <div className="max-h-[min(11rem,27vh)] overflow-y-auto overscroll-y-contain scroll-smooth rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-stone-50/50 dark:bg-slate-950/30 px-3 py-2 sm:px-4">
-          {list}
+          {body}
         </div>
       ) : (
-        list
+        body
       )}
       {showViewFullLink && (
         <div className={`mt-6 pl-8 ${scrollable ? 'border-t border-emerald-200/40 dark:border-emerald-800/30 pt-4' : ''}`}>
