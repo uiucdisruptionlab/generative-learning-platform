@@ -1,20 +1,25 @@
 """
-Supabase read/write for GLP — students, content_items, recommendations, content_interactions.
+Supabase read/write for GLP — students, content_items, recommendations,
+content_interactions, srs_records (spaced repetition; concept_id = Neo4j node id, text).
 No LLM, Neo4j, or LangChain code here.
 """
 
 from __future__ import annotations
 
 import os
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-# Repo root: .../generative-learning-platform (this file is backend/supabase/...)
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=_ENV_PATH)
+# Repo root and backend/.env — same precedence as backend/lesson_loop.py (backend overrides root).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(dotenv_path=_REPO_ROOT / ".env")
+load_dotenv(dotenv_path=_BACKEND_DIR / ".env", override=True)
 
 # Matches seed_students.sql — use for local demo after seeding.
 DEMO_STUDENT_ALICE_ID = "a0000001-0000-4000-8000-000000000001"
@@ -163,54 +168,141 @@ def clear_recommendations(
     supabase.table("recommendations").delete().eq("student_id", student_id).execute()
 
 
-if __name__ == "__main__":
+def get_overdue_reviews(
+    student_id: str,
+    *,
+    client: Optional[Client] = None,
+) -> list[dict[str, Any]]:
+    """
+    SRS rows due for review: next_review_at <= now (UTC), for this student.
+
+    Empty list => session can start with new content; non-empty => review mode.
+    """
+    supabase = client or get_supabase_client()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        # NULL next_review_at is excluded: (NULL <= now) is unknown in SQL.
+        response = (
+            supabase.table("srs_records")
+            .select("*")
+            .eq("student_id", student_id)
+            .lte("next_review_at", now_iso)
+            .order("next_review_at", desc=False)
+            .execute()
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"get_overdue_reviews failed for student_id={student_id!r}: {exc}"
+        ) from exc
+    return list(response.data or [])
+
+
+def _demo_overdue_reviews() -> None:
+    """Insert a mock overdue srs row for Alice and print get_overdue_reviews."""
     sb = get_supabase_client()
     alice = DEMO_STUDENT_ALICE_ID
+    demo_concept_id = "graph:demo-overdue-concept"
 
-    profile = get_student_profile(alice, client=sb)
-    if not profile:
+    if not get_student_profile(alice, client=sb):
         print(
-            "Alice not found. Run backend/seed_students.sql in Supabase, then retry.\n"
+            "Alice not found. Run backend/supabase/seed_students.sql in Supabase, "
+            "then run backend/supabase/migrations/create_srs_records.sql.\n"
         )
         raise SystemExit(1)
 
-    print("Alice profile (excerpt):")
-    print(f"  name={profile.get('name')!r}, major={profile.get('major_or_field')!r}")
-    print(f"  preferred_formats={profile.get('preferred_formats')}")
-    print(f"  llm_profile keys: {list((profile.get('llm_profile') or {}).keys())}\n")
+    # Idempotent demo row (unique student_id + concept_id)
+    sb.table("srs_records").delete().eq("student_id", alice).eq(
+        "concept_id", demo_concept_id
+    ).execute()
 
-    mock_lesson = {
-        "title": "Demo: Variables and assignment (Python)",
-        "summary": "Short lesson on names, binding, and basic types for beginners.",
-        "content_type": "lesson",
-        "difficulty": "beginner",
-        "url": "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/",
-        "topics": ["python", "variables", "assignment"],
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    row = {
+        "student_id": alice,
+        "concept_id": demo_concept_id,
+        "node_id": demo_concept_id,
+        "ease_factor": 2.5,
+        "interval_days": 1,
+        "repetitions": 0,
+        "score": 3,
+        "next_review_at": past,
     }
+    try:
+        sb.table("srs_records").insert(row).execute()
+    except Exception as exc:
+        raise RuntimeError(
+            "Insert failed — did you run create_srs_records.sql on Supabase?"
+        ) from exc
 
-    clear_recommendations(alice, client=sb)
-    new_id = insert_content_item(mock_lesson, client=sb)
-    print(f"Inserted content_item id={new_id}")
+    overdue = get_overdue_reviews(alice, client=sb)
+    print(f"get_overdue_reviews({alice!r}) -> {len(overdue)} row(s)")
+    for r in overdue:
+        if r.get("concept_id") == demo_concept_id:
+            print(
+                f"  OK: concept_id={r.get('concept_id')!r} "
+                f"next_review_at={r.get('next_review_at')} score={r.get('score')}"
+            )
+            return
+    print("  Expected mock row not found in overdue list.")
+    raise SystemExit(1)
 
-    insert_recommendation(
-        alice,
-        new_id,
-        score=0.92,
-        explanation="Start here — foundational syntax before control flow.",
-        client=sb,
-    )
-    insert_content_interaction(
-        alice,
-        new_id,
-        interaction_type="demo_script_insert",
-        client=sb,
-    )
 
-    recs = get_recommendations(alice, client=sb)
-    print(f"\nRecommendations for Alice ({len(recs)}):")
-    for r in recs:
-        item = r.get("content_items") or {}
-        title = item.get("title", "?") if isinstance(item, dict) else "?"
+if __name__ == "__main__":
+    if "--legacy-lesson-demo" in sys.argv:
+        sb = get_supabase_client()
+        alice = DEMO_STUDENT_ALICE_ID
+
+        profile = get_student_profile(alice, client=sb)
+        if not profile:
+            print(
+                "Alice not found. Run backend/supabase/seed_students.sql in Supabase, "
+                "then retry.\n"
+            )
+            raise SystemExit(1)
+
+        print("Alice profile (excerpt):")
         print(
-            f"  score={r.get('score')} | {title!r} | {r.get('explanation', '')[:60]}..."
+            f"  name={profile.get('name')!r}, major={profile.get('major_or_field')!r}"
         )
+        print(f"  preferred_formats={profile.get('preferred_formats')}")
+        print(
+            f"  llm_profile keys: {list((profile.get('llm_profile') or {}).keys())}\n"
+        )
+
+        mock_lesson = {
+            "title": "Demo: Variables and assignment (Python)",
+            "summary": "Short lesson on names, binding, and basic types for beginners.",
+            "content_type": "lesson",
+            "difficulty": "beginner",
+            "url": "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/",
+            "topics": ["python", "variables", "assignment"],
+        }
+
+        clear_recommendations(alice, client=sb)
+        new_id = insert_content_item(mock_lesson, client=sb)
+        print(f"Inserted content_item id={new_id}")
+
+        insert_recommendation(
+            alice,
+            new_id,
+            score=0.92,
+            explanation="Start here — foundational syntax before control flow.",
+            client=sb,
+        )
+        insert_content_interaction(
+            alice,
+            new_id,
+            interaction_type="demo_script_insert",
+            client=sb,
+        )
+
+        recs = get_recommendations(alice, client=sb)
+        print(f"\nRecommendations for Alice ({len(recs)}):")
+        for r in recs:
+            item = r.get("content_items") or {}
+            title = item.get("title", "?") if isinstance(item, dict) else "?"
+            print(
+                f"  score={r.get('score')} | {title!r} | "
+                f"{r.get('explanation', '')[:60]}..."
+            )
+    else:
+        _demo_overdue_reviews()

@@ -222,12 +222,14 @@ def _parse_llm_json(text: str) -> Dict[str, Any]:
     # Find every quoted string and escape any bare control characters inside it.
     def _escape_string(m: re.Match) -> str:  # type: ignore[type-arg]
         inner = m.group(1)
-        inner = inner.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+        inner = inner.replace("\n", "\\n").replace(
+            "\r", "\\r").replace("\t", "\\t")
         # Remove any remaining non-printable control chars
         inner = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", inner)
         return f'"{inner}"'
 
-    cleaned = re.sub(r'"((?:[^"\\]|\\.)*)"', _escape_string, raw, flags=re.DOTALL)
+    cleaned = re.sub(r'"((?:[^"\\]|\\.)*)"',
+                     _escape_string, raw, flags=re.DOTALL)
     return json.loads(cleaned)
 
 
@@ -341,13 +343,122 @@ def _load_roadmap_cache(course: str) -> dict | None:
 
 
 def _save_roadmap_cache(course: str, data: dict) -> None:
-    _course_cache_path(course).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _course_cache_path(course).write_text(json.dumps(
+        data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Lesson roadmap cache (lecture-grouped + LLM-refined). Stored in the existing
+# Supabase `roadmap_cache` table, keyed by student_id (one course per student
+# is currently assumed, so per-student caching is equivalent to per-course).
+# ---------------------------------------------------------------------------
+
+
+def _load_lesson_roadmap_cache(student_id: str) -> dict | None:
+    """Load the cached lesson roadmap for a student from `roadmap_cache`."""
+    try:
+        from supabase_local import get_supabase_client
+
+        supabase = get_supabase_client()
+        resp = (
+            supabase.table("roadmap_cache")
+            .select("roadmap")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            return None
+        roadmap = rows[0].get("roadmap")
+        if isinstance(roadmap, str):
+            try:
+                roadmap = json.loads(roadmap)
+            except Exception:
+                return None
+        # Only treat as a valid lesson roadmap if it has the new shape.
+        if isinstance(roadmap, dict) and roadmap.get("lessons"):
+            return roadmap
+        return None
+    except Exception as exc:
+        print(f"[server] failed to read roadmap_cache for student {student_id!r}: {exc}")
+        return None
+
+
+def _save_lesson_roadmap_cache(student_id: str, data: dict) -> None:
+    """Upsert the cached lesson roadmap for a student into `roadmap_cache`."""
+    try:
+        from supabase_local import get_supabase_client
+
+        supabase = get_supabase_client()
+        row = {
+            "student_id": student_id,
+            "roadmap": data,
+        }
+        supabase.table("roadmap_cache").upsert(
+            row, on_conflict="student_id"
+        ).execute()
+    except Exception as exc:
+        print(f"[server] failed to write roadmap_cache for student {student_id!r}: {exc}")
+
+
+def _get_or_build_lesson_roadmap(
+    student_id: str,
+    course_id: str,
+    force_refresh: bool = False,
+) -> dict:
+    """Return the cached lesson roadmap for a student, building it if missing.
+
+    `student_id` is the cache key; `course_id` is what the builder runs against.
+    Assumes one course per student.
+    """
+    if not force_refresh:
+        cached = _load_lesson_roadmap_cache(student_id)
+        if cached and cached.get("lessons") and cached.get("course_id") == course_id:
+            return cached
+    from graphdb.roadmap_builder import build_course_lesson_roadmap
+
+    fresh = build_course_lesson_roadmap(course_id, refine_with_llm=True)
+    if fresh.get("lessons"):
+        _save_lesson_roadmap_cache(student_id, fresh)
+    return fresh
+
+
+def _course_from_student(student: dict[str, Any]) -> str:
+    goals = student.get("learning_goals") or {}
+    if not isinstance(goals, dict):
+        goals = {}
+    target = " ".join(
+        str(goals.get(key) or "")
+        for key in ("target_course", "course", "primary_focus")
+    ).lower()
+    if "python" in target or "computer science" in target:
+        return "python"
+    if "financ" in target and "account" not in target:
+        return "financing"
+    return "accounting"
+
+
+def _node_ids_from_cached_roadmap(course: str) -> list[str] | None:
+    cached = _load_roadmap_cache(course)
+    if not cached:
+        return None
+    lessons = cached.get("lessons") or []
+    if not isinstance(lessons, list):
+        return None
+    node_ids = [
+        str(lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
+        for lesson in lessons
+        if isinstance(lesson, dict) and (lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
+    ]
+    return node_ids or None
 
 
 def _build_and_cache(course: str, lecture_id: str | None) -> dict:
     from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
     if lecture_id:
-        data = build_roadmap_for_lecture(lecture_id, course=course, refine_with_llm=True)
+        data = build_roadmap_for_lecture(
+            lecture_id, course=course, refine_with_llm=True)
     else:
         data = build_roadmap(course=course, refine_with_llm=True)
     _save_roadmap_cache(course, data)
@@ -404,12 +515,31 @@ def _load_lesson_cache(persona_id: str, lesson_id: str, course: str | None = Non
 def _save_lesson_cache(persona_id: str, lesson_id: str, data: dict, course: str | None = None) -> None:
     path = _get_lesson_cache_path(persona_id, lesson_id, course)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps(
+        data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | None = None) -> dict:
     from lesson_generator import generate_lesson
-    data = generate_lesson(lesson_id=lesson_id, persona_id=persona_id, course_override=course)
+    data = generate_lesson(lesson_id=lesson_id,
+                           persona_id=persona_id, course_override=course)
+    source_course = course
+    if not source_course:
+        try:
+            from personas import get_persona
+            source_course = get_persona(persona_id).get("course")
+        except Exception:
+            source_course = None
+    if source_course:
+        roadmap = _load_roadmap_cache(source_course) or {}
+        for lesson in roadmap.get("lessons", []):
+            if lesson.get("lesson_id") == lesson_id:
+                data.setdefault("concepts", lesson.get("concepts", []))
+                data.setdefault("chunk_ids", lesson.get("chunk_ids", []))
+                data.setdefault("lecture_ids", lesson.get("lecture_ids", []))
+                data.setdefault("prerequisites",
+                                lesson.get("prerequisites", []))
+                break
     _save_lesson_cache(persona_id, lesson_id, data, course)
     return data
 
@@ -468,7 +598,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             return
 
         try:
-            assistant_reply, updated_profile, done = _process_llm_response(raw_text, profile, latest)
+            assistant_reply, updated_profile, done = _process_llm_response(
+                raw_text, profile, latest)
         except Exception as exc:
             yield _sse({"type": "error", "message": f"Parse error: {exc}"})
             return
@@ -489,10 +620,611 @@ class LessonChatMessage(BaseModel):
     role: str
     content: str
 
+
 class LessonChatRequest(BaseModel):
     lesson_id: str
     persona: str
     messages: List[LessonChatMessage]
+
+
+class LessonScoreRequest(BaseModel):
+    lesson_id: str
+    response: str
+    persona: str = "charles"
+    student_id: str | None = None
+    course: str | None = None
+    question: str | None = None
+    reference_answer: str | None = None
+    rubric: str | None = None
+    metadata: Dict[str, Any] | None = None
+
+
+class SessionStartRequest(BaseModel):
+    student_id: str
+    course: Optional[str] = None
+
+
+class LessonBlockRequest(BaseModel):
+    session_id: str
+
+
+class LessonMessageRequest(BaseModel):
+    session_id: str
+    message: Optional[str] = None
+
+
+class LessonCompleteRequest(BaseModel):
+    session_id: str
+
+
+def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None) -> dict[str, Any]:
+    cached = _load_lesson_cache(
+        persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
+    if cached:
+        return cached
+
+    if course:
+        roadmap = _load_roadmap_cache(course) or {}
+        for lesson in roadmap.get("lessons", []):
+            if lesson.get("lesson_id") == lesson_id:
+                return lesson
+
+    return {"lesson_id": lesson_id}
+
+
+def _score_lesson_response(req: LessonScoreRequest, lesson_context: dict[str, Any]) -> dict[str, Any]:
+    system_prompt = """You score learner knowledge-check responses for a spaced repetition system.
+Return valid JSON only. No markdown. No prose outside JSON.
+
+Use this schema:
+{
+  "score": 0,
+  "explanation": "string",
+  "strengths": ["string"],
+  "gaps": ["string"]
+}
+
+Scoring rubric:
+0 = blank, irrelevant, or no evidence of understanding.
+1 = tiny fragment of relevant recall but mostly incorrect.
+2 = partially relevant but misses the core idea or has major errors.
+3 = basically understands the core idea with some gaps.
+4 = correct and clear with minor omissions.
+5 = complete, precise, and well explained.
+
+Only give 3 or higher when the learner demonstrates the central concept."""
+
+    prompt = {
+        "lesson": {
+            "lesson_id": lesson_context.get("lesson_id") or req.lesson_id,
+            "title": lesson_context.get("title"),
+            "overview": lesson_context.get("overview") or lesson_context.get("summary"),
+            "concepts": lesson_context.get("concepts"),
+        },
+        "question": req.question,
+        "reference_answer": req.reference_answer,
+        "rubric": req.rubric,
+        "learner_response": req.response,
+    }
+
+    client = create_bedrock_runtime_client(region=AWS_REGION)
+    response = client.converse(
+        modelId=MODEL_ID,
+        system=[{"text": system_prompt}],
+        messages=[{"role": "user", "content": [
+            {"text": json.dumps(prompt, ensure_ascii=False, indent=2)}]}],
+        inferenceConfig={"maxTokens": 700, "temperature": 0},
+    )
+    raw_text = "".join(
+        block["text"]
+        for block in response["output"]["message"]["content"]
+        if "text" in block
+    ).strip()
+    parsed = _parse_llm_json(raw_text)
+    score = max(0, min(5, int(round(float(parsed.get("score", 0))))))
+    return {
+        "score": score,
+        "explanation": str(parsed.get("explanation") or "").strip(),
+        "strengths": parsed.get("strengths") or [],
+        "gaps": parsed.get("gaps") or [],
+    }
+
+
+@app.post("/lesson/score")
+def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
+    if not req.response.strip():
+        raise HTTPException(status_code=400, detail="response is required")
+
+    from personas import get_persona
+    from srs import PASSING_SCORE, advance_roadmap_progress, upsert_srs_record
+    from supabase_local import get_supabase_client
+
+    try:
+        persona = get_persona(req.persona)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    student_id = req.student_id or persona.get("student_id")
+    if not student_id:
+        raise HTTPException(status_code=400, detail="student_id is required")
+
+    course = req.course or persona.get("course") or "accounting"
+    lesson_context = _lesson_context_for_scoring(
+        req.lesson_id, req.persona, course)
+
+    try:
+        scoring = _score_lesson_response(req, lesson_context)
+        supabase = get_supabase_client()
+        srs_record = upsert_srs_record(
+            student_id=student_id,
+            node_id=req.lesson_id,
+            course=course,
+            score=scoring["score"],
+            metadata={
+                "question": req.question,
+                "reference_answer": req.reference_answer,
+                "learner_response": req.response,
+                "scoring_explanation": scoring["explanation"],
+                "strengths": scoring["strengths"],
+                "gaps": scoring["gaps"],
+                **(req.metadata or {}),
+            },
+            client=supabase,
+        )
+
+        passed = scoring["score"] >= PASSING_SCORE
+        roadmap_progress = None
+        if passed:
+            roadmap_progress = advance_roadmap_progress(
+                student_id=student_id,
+                course=course,
+                lesson_id=req.lesson_id,
+                client=supabase,
+            )
+
+        return {
+            "student_id": student_id,
+            "lesson_id": req.lesson_id,
+            "course": course,
+            "score": scoring["score"],
+            "passed": passed,
+            "explanation": scoring["explanation"],
+            "strengths": scoring["strengths"],
+            "gaps": scoring["gaps"],
+            "srs_record": srs_record,
+            "roadmap_progress": roadmap_progress,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/srs/due")
+def get_due_reviews(
+    student_id: str = Query(default=""),
+    persona: str = Query(default="charles"),
+) -> dict[str, Any]:
+    from personas import get_persona
+    from srs import get_due_srs_records
+    from supabase_local import get_supabase_client
+
+    if not student_id:
+        try:
+            student_id = get_persona(persona).get("student_id", "")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if not student_id:
+        raise HTTPException(status_code=400, detail="student_id is required")
+
+    try:
+        due = get_due_srs_records(student_id, client=get_supabase_client())
+        return {"student_id": student_id, "due": due, "review_mode": bool(due)}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/roadmap_position/{student_id}")
+def get_student_roadmap_position(student_id: str) -> dict[str, Any]:
+    from srs import get_roadmap_position
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        sc_rows = sc_resp.data or []
+        course_id = str(sc_rows[0]["course_id"]) if sc_rows else ""
+        position = get_roadmap_position(student_id, course_id=course_id, client=supabase)
+        return {
+            "student_id": student_id,
+            "course_id": course_id,
+            "current_index": int(position.get("current_index") or 0),
+            "updated_at": position.get("updated_at"),
+        }
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/roadmap/generate/{student_id}")
+def generate_student_roadmap(student_id: str) -> dict[str, Any]:
+    """Lecture-grouped, LLM-refined roadmap with per-lesson and per-concept state.
+
+    Response shape:
+        {
+            "student_id", "course_id", "current_index",
+            "node_ids": [concept_id, ...],         # flat ordered concepts
+            "lessons": [
+                {
+                    "lesson_id", "title", "summary", "state",
+                    "concepts": [
+                        {"id", "name", "description", "state"}, ...
+                    ],
+                },
+                ...
+            ],
+            # `concepts` mirrors `node_ids` for legacy clients that haven't been updated yet.
+            "concepts": [{"id", "name", "description", "state"}, ...],
+        }
+    """
+    from srs import get_roadmap_position
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        sc_rows = sc_resp.data or []
+        if not sc_rows:
+            raise HTTPException(status_code=404, detail="no course enrollment found for student")
+        course_id = str(sc_rows[0]["course_id"])
+
+        roadmap = _get_or_build_lesson_roadmap(student_id, course_id)
+        lessons = roadmap.get("lessons") or []
+        node_ids: list[str] = list(roadmap.get("node_ids") or [])
+
+        position = get_roadmap_position(student_id, course_id=course_id, client=supabase)
+        current_index = int(position.get("current_index") or 0)
+        if node_ids:
+            current_index = max(0, min(current_index, len(node_ids) - 1))
+
+        enriched_lessons: list[dict[str, Any]] = []
+        flat_concepts: list[dict[str, Any]] = []
+        flat_idx = 0
+        for lesson in lessons:
+            lesson_concepts = lesson.get("concepts") or []
+            lesson_concept_count = len(lesson_concepts)
+            if not lesson_concept_count:
+                continue
+            lesson_start = flat_idx
+            lesson_end = flat_idx + lesson_concept_count - 1
+            if current_index < lesson_start:
+                lesson_state = "locked"
+            elif current_index > lesson_end:
+                lesson_state = "completed"
+            else:
+                lesson_state = "active"
+
+            ec: list[dict[str, Any]] = []
+            for c in lesson_concepts:
+                if flat_idx < current_index:
+                    state = "completed"
+                elif flat_idx == current_index:
+                    state = "active"
+                else:
+                    state = "locked"
+                concept_dict = {
+                    "id": str(c.get("id") or ""),
+                    "name": c.get("name") or "",
+                    "description": c.get("description") or "",
+                    "state": state,
+                }
+                ec.append(concept_dict)
+                flat_concepts.append(concept_dict)
+                flat_idx += 1
+
+            enriched_lessons.append({
+                "lesson_id": str(lesson.get("lesson_id") or ""),
+                "title": str(lesson.get("title") or ""),
+                "summary": str(lesson.get("summary") or ""),
+                "lecture_ids": list(lesson.get("lecture_ids") or []),
+                "state": lesson_state,
+                "concepts": ec,
+            })
+
+        return {
+            "student_id": student_id,
+            "course_id": course_id,
+            "current_index": current_index,
+            "node_ids": node_ids,
+            "lessons": enriched_lessons,
+            "concepts": flat_concepts,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/roadmap/{student_id}")
+def get_student_roadmap(student_id: str) -> dict[str, Any]:
+    return generate_student_roadmap(student_id)
+
+
+@app.post("/roadmap/{student_id}/rebuild")
+def rebuild_student_lesson_roadmap(student_id: str) -> dict[str, Any]:
+    """Force a fresh LLM-refined lesson roadmap rebuild for the student's enrolled course."""
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        sc_rows = sc_resp.data or []
+        if not sc_rows:
+            raise HTTPException(status_code=404, detail="no course enrollment found for student")
+        course_id = str(sc_rows[0]["course_id"])
+        _get_or_build_lesson_roadmap(student_id, course_id, force_refresh=True)
+        return generate_student_roadmap(student_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+_LESSON_HISTORY_COLUMNS = (
+    "session_id, student_id, course_id, lesson_id, concept_id, concept_name, "
+    "mode, score, passed, started_at, completed_at, metadata"
+)
+
+
+@app.get("/lesson_history/{student_id}")
+def list_lesson_history(
+    student_id: str,
+    concept_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """List completed lesson sessions for a student, optionally filtered by concept_id.
+
+    Returns metadata only (no transcript). Use `/lesson_session/{session_id}` for the full log.
+    """
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        query = (
+            supabase.table("lesson_sessions")
+            .select(_LESSON_HISTORY_COLUMNS)
+            .eq("student_id", student_id)
+            .order("completed_at", desc=True)
+            .limit(limit)
+        )
+        if concept_id:
+            query = query.eq("concept_id", concept_id)
+        resp = query.execute()
+        return {
+            "student_id": student_id,
+            "concept_id": concept_id,
+            "sessions": list(resp.data or []),
+        }
+    except Exception as exc:
+        msg = str(exc)
+        if "lesson_sessions" in msg and ("Could not find" in msg or "PGRST205" in msg):
+            return {"student_id": student_id, "concept_id": concept_id, "sessions": []}
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=msg)
+
+
+@app.get("/lesson_session/{session_id}")
+def get_lesson_session(session_id: str) -> dict[str, Any]:
+    """Read a single completed lesson session, including the full transcript."""
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        resp = (
+            supabase.table("lesson_sessions")
+            .select("*")
+            .eq("session_id", session_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            raise HTTPException(status_code=404, detail="lesson session not found")
+        return rows[0]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        msg = str(exc)
+        if "lesson_sessions" in msg and ("Could not find" in msg or "PGRST205" in msg):
+            raise HTTPException(status_code=404, detail="lesson session not found")
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=msg)
+
+
+@app.get("/courses")
+def get_courses_endpoint() -> dict[str, Any]:
+    from graphdb.neo4j_client import get_courses
+
+    try:
+        return {"courses": get_courses()}
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/student/{student_id}/courses")
+def get_student_enrolled_courses(student_id: str) -> dict[str, Any]:
+    """Only the Neo4j Course nodes that the student is enrolled in via student_courses."""
+    from graphdb.neo4j_client import get_courses
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        sc_resp = (
+            supabase.table("student_courses")
+            .select("course_id")
+            .eq("student_id", student_id)
+            .execute()
+        )
+        enrolled_ids = {str(row["course_id"]) for row in (sc_resp.data or [])}
+        if not enrolled_ids:
+            return {"courses": []}
+        all_courses = get_courses()
+        filtered = [c for c in all_courses if str(c.get("id") or "") in enrolled_ids]
+        return {"courses": filtered}
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/srs/due/{student_id}")
+def get_due_reviews_for_student(student_id: str) -> dict[str, Any]:
+    from srs import get_upcoming_srs_records
+    from supabase_local import get_supabase_client
+
+    try:
+        due = get_upcoming_srs_records(student_id, days=7, client=get_supabase_client())
+        return {"student_id": student_id, "due": due, "review_mode": bool(due)}
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/student/{student_id}")
+def get_student(student_id: str) -> dict[str, Any]:
+    from supabase_local import get_student_profile, get_supabase_client
+
+    try:
+        profile = get_student_profile(student_id, client=get_supabase_client())
+        if not profile:
+            raise HTTPException(status_code=404, detail="student not found")
+        return profile
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/session/start")
+def adaptive_session_start(req: SessionStartRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import start_session
+
+        return start_session(req.student_id, req.course)
+    except ValueError as exc:
+        msg = str(exc)
+        if "No course enrollment" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/session/{session_id}")
+def adaptive_session_get(session_id: str) -> dict[str, Any]:
+    try:
+        from adaptive_session import get_session_public
+
+        return get_session_public(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/block")
+def adaptive_lesson_block(req: LessonBlockRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import generate_block
+
+        return generate_block(req.session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/message")
+def adaptive_lesson_message(req: LessonMessageRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import lesson_message
+
+        return lesson_message(req.session_id, req.message)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/complete")
+def adaptive_lesson_complete(req: LessonCompleteRequest) -> dict[str, Any]:
+    try:
+        from adaptive_session import complete_lesson
+
+        return complete_lesson(req.session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/lesson/chat")
@@ -502,7 +1234,8 @@ async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
     if cached:
         title = cached.get("title", "")
         overview = cached.get("overview", "")
-        concepts = ", ".join(c["name"] for c in cached.get("concepts", []) if isinstance(c, dict))
+        concepts = ", ".join(c["name"] for c in cached.get(
+            "concepts", []) if isinstance(c, dict))
         lesson_context = f"Lesson: {title}\nOverview: {overview}\nConcepts covered: {concepts}"
 
     from personas import get_persona
@@ -541,7 +1274,8 @@ Adapt your tone and depth to the student's profile.
 
         latest = user_messages[-1]["content"]
         history_for_bedrock = [
-            {"role": m["role"], "content": [{"type": "text", "text": m["content"]}]}
+            {"role": m["role"], "content": [
+                {"type": "text", "text": m["content"]}]}
             for m in messages[:-1]
         ]
 
@@ -553,7 +1287,8 @@ Adapt your tone and depth to the student's profile.
                 modelId=MODEL_ID,
                 system=[{"text": system_prompt}],
                 messages=history_for_bedrock + [
-                    {"role": "user", "content": [{"type": "text", "text": latest}]}
+                    {"role": "user", "content": [
+                        {"type": "text", "text": latest}]}
                 ],
                 inferenceConfig={"maxTokens": 1024, "temperature": 0.5},
             )
@@ -573,6 +1308,92 @@ Adapt your tone and depth to the student's profile.
         yield _sse({"type": "done", "message": reply})
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+class InteractiveLessonStartRequest(BaseModel):
+    lesson_id: str
+    persona: str = "charles"
+    course: Optional[str] = None
+
+
+class InteractiveLessonTickRequest(BaseModel):
+    session_id: str
+    message: Optional[str] = None
+    action: Optional[str] = None
+    widget_result: Optional[Dict[str, Any]] = None
+
+
+class InteractiveLessonWidgetRequest(BaseModel):
+    session_id: str
+    widget_type: str
+    payload: Dict[str, Any]
+    note: Optional[str] = None
+
+
+@app.post("/lesson/interactive/start")
+def interactive_lesson_start(req: InteractiveLessonStartRequest) -> dict[str, Any]:
+    """Walk a lesson dynamically using Pinecone + YouTube (same sources as /lesson) and Bedrock checkpoints."""
+    try:
+        from dynamic_lesson import start_session
+
+        return start_session(req.lesson_id, req.persona, req.course)
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/lesson/interactive/tick")
+def interactive_lesson_tick(req: InteractiveLessonTickRequest) -> dict[str, Any]:
+    try:
+        from dynamic_lesson import tick_session
+
+        return tick_session(
+            req.session_id,
+            message=req.message,
+            action=req.action,
+            widget_result=req.widget_result,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/lesson/interactive/session/{session_id}")
+def interactive_lesson_session(session_id: str) -> dict[str, Any]:
+    try:
+        from dynamic_lesson import get_session_public
+
+        return get_session_public(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+
+
+@app.post("/lesson/interactive/widget")
+def interactive_lesson_enqueue_widget(req: InteractiveLessonWidgetRequest) -> dict[str, Any]:
+    """
+    Attach an MCQ / flashcard / free-response block (same shape the model returns in pending_widget).
+    Lets a tool-calling layer or tests push UI without going through a reflection tick.
+    """
+    try:
+        from dynamic_lesson import enqueue_widget
+
+        return enqueue_widget(
+            req.session_id,
+            {"type": req.widget_type, "payload": req.payload},
+            note=req.note,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 if __name__ == "__main__":

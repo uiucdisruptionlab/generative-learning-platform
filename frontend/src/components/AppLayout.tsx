@@ -13,6 +13,10 @@ type AppLayoutProps = {
   title: string
   description: string
   action?: ReactNode
+  sidebarProfileOverride?: {
+    displayName?: string
+    studentId?: string
+  }
   children: ReactNode
 }
 
@@ -24,11 +28,15 @@ export default function AppLayout({
   title,
   description,
   action,
+  sidebarProfileOverride,
   children,
 }: AppLayoutProps) {
   const location = useLocation()
   const { currentPersona, setCurrentPersona } = usePersona()
   const sidebarProfile = getSidebarProfile(currentPersona)
+  const displayName = sidebarProfileOverride?.displayName ?? sidebarProfile?.displayName ?? sidebarProfile?.name ?? 'Learner'
+  const studentId = sidebarProfileOverride?.studentId ?? sidebarProfile?.studentId ?? sidebarProfile?.id ?? 'unknown'
+  const avatarUrl = sidebarProfile?.avatarUrl ?? ''
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
@@ -118,7 +126,7 @@ export default function AppLayout({
           </div>
           <div className="flex items-center gap-3.5 px-1 pt-6">
             <img
-              src={sidebarProfile.avatarUrl}
+              src={avatarUrl}
               alt=""
               width={44}
               height={44}
@@ -126,9 +134,9 @@ export default function AppLayout({
             />
             <div className="flex flex-col min-w-0">
               <p className="text-sm font-bold text-slate-900 dark:text-white leading-tight truncate">
-                {sidebarProfile.displayName}
+                {displayName}
               </p>
-              <p className="text-[11px] text-slate-400 font-medium">Student ID: {sidebarProfile.studentId}</p>
+              <p className="text-[11px] text-slate-400 font-medium">Student ID: {studentId}</p>
             </div>
           </div>
         </div>

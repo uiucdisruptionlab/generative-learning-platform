@@ -24,7 +24,7 @@ export const PERSONAS: Record<string, Persona> = {
     learningPreferences: ['videos', 'hands-on'],
     learningStyle: 'Prefers video lectures and hands-on coding problems. Not very familiar with programming yet.',
     experienceLevel: 'beginner',
-    primaryRoadmapPath: '/roadmap/python',
+    primaryRoadmapPath: '/roadmap',
   },
   bob: {
     id: 'bob',
@@ -36,7 +36,7 @@ export const PERSONAS: Record<string, Persona> = {
     learningPreferences: ['reading', 'ai-interaction'],
     learningStyle: 'Enjoys reading detailed materials and discussing topics with AI using lots of examples. Very familiar with the subject matter.',
     experienceLevel: 'advanced',
-    primaryRoadmapPath: '/roadmap/financing',
+    primaryRoadmapPath: '/roadmap',
   },
   charles: {
     id: 'charles',
@@ -48,7 +48,7 @@ export const PERSONAS: Record<string, Persona> = {
     learningPreferences: ['flashcards', 'quizzes'],
     learningStyle: 'Loves flashcard reviews and knowledge-testing questions. Can dedicate significant time to studying.',
     experienceLevel: 'intermediate',
-    primaryRoadmapPath: '/roadmap/accounting',
+    primaryRoadmapPath: '/roadmap',
   },
 }
 

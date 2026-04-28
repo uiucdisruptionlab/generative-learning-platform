@@ -21,20 +21,20 @@ insert into students (
   '{
     "primary_focus": "Learn Python fundamentals",
     "coding_experience": "beginner",
-    "target_course": "MIT 6.0001 Introduction to Computer Science and Programming in Python"
+    "target_course": "Introduction to Computer Science and Programming in Python"
   }'::jsonb,
   '[
     "programming",
     "python",
-    "MIT OpenCourseWare",
-    "https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/download/"
+    "data science",
+    "finance"
   ]'::jsonb,
   5,
   '["videos", "hands-on problems", "practice exercises"]'::jsonb,
   '{
     "learning_style_summary": "Beginner coder; responds well to video instruction and hands-on practice.",
     "subject_confidence": "beginner",
-    "notes": "Interested in MIT OCW 6.0001 Python course."
+    "notes": "Learning Python fundamentals with a focus on applying them to finance and data science."
   }'::jsonb
 ),
 (
@@ -49,15 +49,15 @@ insert into students (
   '[
     "economic development",
     "public policy",
-    "MIT OpenCourseWare",
-    "https://ocw.mit.edu/courses/11-437-financing-economic-development-fall-2016/pages/syllabus/"
+    "finance",
+    "business"
   ]'::jsonb,
   2,
   '["reading", "worked examples", "AI interaction"]'::jsonb,
   '{
     "learning_style_summary": "Very familiar with the subject; prefers reading, concrete examples, and conversational AI support.",
     "subject_confidence": "comfortable",
-    "notes": "Following MIT 11.437 Financing Economic Development."
+    "notes": "Studying financing and economic development with strong prior knowledge of the topic."
   }'::jsonb
 ),
 (
@@ -67,20 +67,35 @@ insert into students (
   'Accounting',
   '{
     "primary_focus": "Financial and managerial accounting foundations",
+    "career_goal": "Become a CPA and work in corporate financial reporting",
+    "industry_interest": "Technology and startup finance",
     "coding_experience": "not_primary"
   }'::jsonb,
   '[
     "financial accounting",
     "managerial accounting",
-    "MIT OpenCourseWare",
-    "https://ocw.mit.edu/courses/15-501-introduction-to-financial-and-managerial-accounting-spring-2004/"
+    "CPA exam prep",
+    "financial reporting",
+    "audit workflows",
+    "business",
+    "finance"
   ]'::jsonb,
   10,
   '["flashcards", "practice questions"]'::jsonb,
   '{
-    "learning_style_summary": "Prefers retrieval practice via flashcards and targeted practice questions.",
+    "learning_style_summary": "Prefers retrieval practice via flashcards and targeted practice questions, especially applied to real corporate reporting scenarios.",
     "subject_confidence": "somewhat_familiar",
-    "notes": "Using MIT 15.501 Introduction to Financial and Managerial Accounting."
+    "notes": "Building foundations in financial and managerial accounting through active recall with examples tied to CPA-style tasks and corporate finance workflows."
   }'::jsonb
 )
-on conflict (id) do nothing;
+on conflict (id) do update set
+  name = excluded.name,
+  academic_level = excluded.academic_level,
+  major_or_field = excluded.major_or_field,
+  learning_goals = excluded.learning_goals,
+  interests = excluded.interests,
+  weekly_hours = excluded.weekly_hours,
+  preferred_formats = excluded.preferred_formats,
+  llm_profile = excluded.llm_profile;
+
+-- SRS sample rows: backend/supabase/seed_students_srs.sql (run after this file).

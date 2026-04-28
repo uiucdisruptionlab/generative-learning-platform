@@ -1,54 +1,99 @@
-import { useState, useEffect } from 'react'
+import { MouseEvent, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
-import RoadmapCourseSelect from '../components/RoadmapCourseSelect'
+import type { HomeRoadmapConcept, HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+import { usePersona } from '../contexts/PersonaContext'
 import {
-  fetchRoadmap,
-  mapLessonsToOutcomes,
-  ROADMAP_TARGETS,
-  type FrontendRoadmapTarget,
-} from '../api/roadmap'
-import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+  fetchStudentRoadmapData,
+  startSession,
+  type GeneratedRoadmap,
+  type GeneratedRoadmapConcept,
+  type GeneratedRoadmapLesson,
+  type RoadmapState,
+} from '../api/home'
 
-const COURSE_LABELS: Record<string, { title: string; description: string }> = {
-  accounting: { title: 'Financial Accounting', description: 'Personalized for you' },
-  python: { title: 'Intro to Python', description: 'Personalized for you' },
-  financing: { title: 'Financing Economic Development', description: 'Personalized for you' },
+type RoadmapData = Awaited<ReturnType<typeof fetchStudentRoadmapData>>
+
+function stateToStatus(state: RoadmapState | undefined): HomeRoadmapOutcome['status'] {
+  if (state === 'completed') return 'completed'
+  if (state === 'active') return 'current'
+  return 'upcoming'
 }
 
-function getCourseKey(target: FrontendRoadmapTarget): string {
-  const course = target.course.toLowerCase()
-  if (course.includes('alec') || course === 'accounting') return 'accounting'
-  if (course === 'python') return 'python'
-  if (course === 'financing') return 'financing'
-  return 'accounting'
+function lessonSubtext(lesson: GeneratedRoadmapLesson): string | undefined {
+  if (lesson.summary && lesson.summary.trim()) return lesson.summary
+  const count = lesson.concepts?.length ?? 0
+  if (!count) return undefined
+  return `${count} concept${count === 1 ? '' : 's'}`
+}
+
+function toConcept(c: GeneratedRoadmapConcept): HomeRoadmapConcept {
+  return {
+    id: String(c.id ?? c.name ?? ''),
+    name: c.name ?? c.id ?? '',
+    description: c.description,
+    status: stateToStatus(c.state),
+  }
+}
+
+function makeLessonOutcomes(roadmap: GeneratedRoadmap | undefined): HomeRoadmapOutcome[] {
+  const lessons = roadmap?.lessons ?? []
+  return lessons.map((lesson) => ({
+    id: lesson.lesson_id,
+    title: lesson.title,
+    status: stateToStatus(lesson.state),
+    subtext: lessonSubtext(lesson),
+    concepts: (lesson.concepts ?? []).map(toConcept),
+  }))
 }
 
 export default function RoadmapPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [outcomes, setOutcomes] = useState<HomeRoadmapOutcome[] | null>(null)
-  const [target, setTarget] = useState<FrontendRoadmapTarget>(ROADMAP_TARGETS.accounting)
-  const [selectedPath, setSelectedPath] = useState('/roadmap')
+  const [data, setData] = useState<RoadmapData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-
-  const courseKey = getCourseKey(target)
-  const courseLabel = COURSE_LABELS[courseKey] ?? COURSE_LABELS.accounting
+  const { studentId } = usePersona()
+  const navigate = useNavigate()
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    setOutcomes(null)
-    fetchRoadmap({ ...target, refine: true })
-      .then((data) => {
-        setOutcomes(mapLessonsToOutcomes(data.lessons))
-        setError(null)
+    setData(null)
+    setError(null)
+    fetchStudentRoadmapData(studentId)
+      .then((next) => {
+        if (!cancelled) setData(next)
       })
-      .catch((err) => setError(String(err)))
-      .finally(() => setLoading(false))
-  }, [target])
+      .catch((err) => {
+        if (!cancelled) setError(String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [studentId])
 
-  const outcomeCount = outcomes ? `${outcomes.length} learning outcomes` : '...'
+  const outcomes = useMemo(() => makeLessonOutcomes(data?.roadmap), [data?.roadmap])
+  const activeLesson = useMemo(
+    () => (data?.roadmap.lessons ?? []).find((lesson) => lesson.state === 'active'),
+    [data?.roadmap.lessons],
+  )
+  const title = data?.student.learning_goals?.target_course || data?.student.learning_goals?.primary_focus || 'Roadmap'
+  const description = `${outcomes.length} lesson${outcomes.length === 1 ? '' : 's'} · Personalized for you`
+
+  const handleStartHere = async (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    try {
+      const session = await startSession(studentId)
+      navigate(`/lesson?session_id=${encodeURIComponent(session.session_id)}`)
+    } catch (err) {
+      setError(String(err))
+    }
+  }
 
   return (
     <AppLayout
@@ -56,18 +101,8 @@ export default function RoadmapPage() {
       onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       settingsOpen={settingsOpen}
       onToggleSettings={() => setSettingsOpen(!settingsOpen)}
-      title={courseLabel.title}
-      description={`${outcomeCount} · ${courseLabel.description}`}
-      action={<RoadmapCourseSelect variant="header" value={selectedPath} onValueChange={(path) => {
-        setSelectedPath(path)
-        if (path === '/roadmap/accounting' || path === '/roadmap') {
-          setTarget(ROADMAP_TARGETS.accounting)
-        } else if (path === '/roadmap/python' || path === '/roadmap/cs101') {
-          setTarget(ROADMAP_TARGETS.python)
-        } else if (path === '/roadmap/financing') {
-          setTarget(ROADMAP_TARGETS.financing)
-        }
-      }} />}
+      title={title}
+      description={description}
     >
       <div className="max-w-[800px] w-full min-w-0 mx-auto px-8 lg:px-12 py-8 lg:py-12">
         {error && (
@@ -82,8 +117,12 @@ export default function RoadmapPage() {
           </div>
         ) : (
           <LearningRoadmap
-            outcomes={outcomes ?? undefined}
-            startHereTo={outcomes && outcomes.length > 0 ? `/lesson/${outcomes[0].id}?course=${courseKey}` : '#'}
+            outcomes={outcomes.length ? outcomes : []}
+            startHereTo={activeLesson ? `/lesson?lesson_id=${encodeURIComponent(activeLesson.lesson_id)}` : '#'}
+            onStartHere={handleStartHere}
+            buildTranscriptHref={(concept) =>
+              `/lesson/transcript?student_id=${encodeURIComponent(studentId)}&concept_id=${encodeURIComponent(concept.id)}`
+            }
           />
         )}
 

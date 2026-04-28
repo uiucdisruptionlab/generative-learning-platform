@@ -1,72 +1,56 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import { usePersona } from '../contexts/PersonaContext'
+import { fetchCoursesData, type CourseNode } from '../api/home'
+
+type CoursesData = Awaited<ReturnType<typeof fetchCoursesData>>
+
+const GRADIENTS = [
+  'from-rose-200 to-red-100 dark:from-rose-800/60 dark:to-red-900/40',
+  'from-primary/45 to-emerald-300/70 dark:from-primary/50 dark:to-emerald-400/50',
+  'from-amber-200 to-amber-100 dark:from-amber-800/60 dark:to-amber-900/40',
+  'from-violet-200 to-purple-100 dark:from-violet-800/60 dark:to-purple-900/40',
+  'from-blue-200 to-sky-100 dark:from-blue-800/60 dark:to-sky-900/40',
+]
+
+function coursePath(course: CourseNode): string {
+  return `/roadmap/${encodeURIComponent(course.id)}`
+}
+
+function isActiveCourse(course: CourseNode, activeCourseId: string | undefined): boolean {
+  if (!activeCourseId) return false
+  return String(course.id) === String(activeCourseId)
+}
 
 export default function CoursesPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const { currentPersona, persona } = usePersona()
+  const { studentId } = usePersona()
+  const [data, setData] = useState<CoursesData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const getPersonaCourseCode = () => {
-    if (currentPersona === 'alice') return 'CS 6.0001'
-    if (currentPersona === 'bob') return 'URB 11.437'
-    if (currentPersona === 'charles') return 'ACCY 15.501'
-    return null
-  }
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetchCoursesData(studentId)
+      .then((next) => {
+        if (!cancelled) setData(next)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [studentId])
 
-  const personaCourseCode = getPersonaCourseCode()
-
-  const courses = [
-    {
-      code: 'ACCY 15.501',
-      title: 'Financial & Managerial Accounting',
-      prof: 'Prof. Sugata Roychowdhury',
-      badge: currentPersona === 'charles' ? 'Active Course' : null,
-      badgeStyle: 'bg-primary text-white',
-      gradient: 'from-rose-200 to-red-100 dark:from-rose-800/60 dark:to-red-900/40',
-      roadmapLink: '/roadmap/accounting',
-      isPersonaCourse: currentPersona === 'charles'
-    },
-    {
-      code: 'CS 6.0001',
-      title: 'Intro to Computer Science & Python',
-      prof: 'Prof. Ana Bell',
-      badge: currentPersona === 'alice' ? 'Active Course' : 'New Content',
-      badgeStyle: currentPersona === 'alice' ? 'bg-primary text-white' : 'bg-emerald-600 text-white',
-      gradient: 'from-primary/45 to-emerald-300/70 dark:from-primary/50 dark:to-emerald-400/50',
-      roadmapLink: '/roadmap/python',
-      isPersonaCourse: currentPersona === 'alice'
-    },
-    {
-      code: 'URB 11.437',
-      title: 'Financing Economic Development',
-      prof: 'Prof. Karl Seidman',
-      badge: currentPersona === 'bob' ? 'Active Course' : null,
-      badgeStyle: 'bg-primary text-white',
-      gradient: 'from-amber-200 to-amber-100 dark:from-amber-800/60 dark:to-amber-900/40',
-      roadmapLink: '/roadmap/financing',
-      isPersonaCourse: currentPersona === 'bob'
-    },
-    {
-      code: 'HIST 102',
-      title: 'World History II',
-      prof: 'Prof. James Wilson',
-      badge: null,
-      gradient: 'from-violet-200 to-purple-100 dark:from-violet-800/60 dark:to-purple-900/40',
-      roadmapLink: '/roadmap/hist102',
-      isPersonaCourse: false
-    },
-    {
-      code: 'ECON 201',
-      title: 'Macroeconomics',
-      prof: 'Prof. Robert Smith',
-      badge: null,
-      gradient: 'from-blue-200 to-sky-100 dark:from-blue-800/60 dark:to-sky-900/40',
-      roadmapLink: '/roadmap/econ201',
-      isPersonaCourse: false
-    },
-  ]
+  const courses = data?.courses ?? []
 
   return (
     <AppLayout
@@ -95,32 +79,48 @@ export default function CoursesPage() {
           </div>
         </div>
 
+        {loading ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-24 text-gray-400 dark:text-gray-500">
+            <span className="material-symbols-outlined animate-spin text-4xl text-primary">progress_activity</span>
+            <p className="text-sm">Loading your courses…</p>
+          </div>
+        ) : error ? (
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
+            Unable to load courses right now.
+          </div>
+        ) : courses.length === 0 ? (
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
+            No courses found.
+          </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-10 min-w-0">
-          {courses.map((course, i) => (
+          {courses.map((course, i) => {
+            const active = isActiveCourse(course, data?.roadmap.course_id)
+            return (
             <div
-              key={course.code}
+              key={course.id}
               className={`group bg-white/95 dark:bg-slate-900/95 rounded-2xl border-2 shadow-[0_4px_20px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(44,89,38,0.12)] hover:-translate-y-1.5 hover:border-primary/50 transition-all duration-500 overflow-hidden flex flex-col ${
-                course.isPersonaCourse
+                active
                   ? 'border-primary/60 dark:border-primary/60 ring-2 ring-primary/20'
                   : 'border-primary/20 dark:border-primary/30'
-              } ${i >= 3 && !course.isPersonaCourse ? 'opacity-90 hover:opacity-100' : ''}`}
+              } ${i >= 3 && !active ? 'opacity-90 hover:opacity-100' : ''}`}
             >
               <div className={`h-32 bg-primary/5 relative overflow-hidden`}>
-                <div className={`absolute inset-0 bg-gradient-to-br ${course.gradient}`} />
-                {course.badge && (
-                  <div className={`absolute top-4 right-4 ${course.badgeStyle} px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest uppercase shadow-sm`}>
-                    {course.badge}
+                <div className={`absolute inset-0 bg-gradient-to-br ${GRADIENTS[i % GRADIENTS.length]}`} />
+                {active && (
+                  <div className={`absolute top-4 right-4 bg-primary text-white px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest uppercase shadow-sm`}>
+                    Active Course
                   </div>
                 )}
               </div>
               <div className="p-6 flex-1 flex flex-col">
                 <div className="mb-4">
-                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${course.badge ? 'text-primary/70' : 'text-slate-400'}`}>{course.code}</span>
+                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${active ? 'text-primary/70' : 'text-slate-400'}`}>{course.course_code || course.id}</span>
                   <h3 className="text-lg font-extrabold text-slate-900 dark:text-white mt-1 leading-tight group-hover:text-primary transition-colors font-display">{course.title}</h3>
-                  <p className="text-slate-500 dark:text-slate-400 text-xs mt-1.5 font-medium">{course.prof}</p>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs mt-1.5 font-medium">{course.professor || ''}</p>
                 </div>
                 <div className="mt-auto space-y-3">
-                  <Link to={course.roadmapLink} className="w-full py-3 bg-gradient-to-r from-primary to-primary-light text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:shadow-xl hover:shadow-primary/30 transition-all shadow-lg shadow-primary/25">
+                  <Link to={coursePath(course)} className="w-full py-3 bg-gradient-to-r from-primary to-primary-light text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 hover:shadow-xl hover:shadow-primary/30 transition-all shadow-lg shadow-primary/25">
                     <span className="material-symbols-outlined text-xl">rocket_launch</span>
                     Personalized View
                   </Link>
@@ -130,8 +130,9 @@ export default function CoursesPage() {
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
+        )}
       </div>
     </AppLayout>
   )

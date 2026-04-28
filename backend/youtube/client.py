@@ -4,37 +4,68 @@ import os
 import requests
 from typing import Any
 
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 
 
+def _thumbnail_url(snippet: dict[str, Any]) -> str:
+    thumbs = snippet.get("thumbnails") or {}
+    for key in ("medium", "high", "standard", "default"):
+        t = thumbs.get(key)
+        if isinstance(t, dict) and t.get("url"):
+            return str(t["url"])
+    return ""
+
+
 def search_videos(query: str, max_results: int = 3) -> list[dict[str, Any]]:
-    """Search YouTube for videos matching the query. Returns a list of video metadata."""
-    if not YOUTUBE_API_KEY:
-        raise RuntimeError("YOUTUBE_API_KEY is not set in environment variables.")
+    """
+    Search YouTube Data API v3 for videos. Returns [] if the API key is missing or the request fails.
+
+    Reads YOUTUBE_API_KEY at call time (not import time) so server startup can load_dotenv first.
+    """
+    api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
+    if not api_key:
+        print("[youtube] YOUTUBE_API_KEY is not set; skipping video search.")
+        return []
 
     params = {
         "part": "snippet",
         "q": query,
         "type": "video",
         "maxResults": max_results,
-        "key": YOUTUBE_API_KEY,
+        "key": api_key,
         "relevanceLanguage": "en",
         "safeSearch": "strict",
     }
 
-    response = requests.get(YOUTUBE_SEARCH_URL, params=params, timeout=10)
-    response.raise_for_status()
-    items = response.json().get("items", [])
+    try:
+        response = requests.get(YOUTUBE_SEARCH_URL, params=params, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"[youtube] Search request failed: {exc}")
+        return []
 
-    return [
-        {
-            "video_id": item["id"]["videoId"],
-            "title": item["snippet"]["title"],
-            "channel": item["snippet"]["channelTitle"],
-            "description": item["snippet"]["description"],
-            "url": f"https://www.youtube.com/watch?v={item['id']['videoId']}",
-            "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"],
-        }
-        for item in items
-    ]
+    items = response.json().get("items", [])
+    out: list[dict[str, Any]] = []
+    for item in items:
+        vid = (item.get("id") or {}).get("videoId")
+        snippet = item.get("snippet") or {}
+        if not vid or not snippet:
+            continue
+        title = snippet.get("title") or "Untitled"
+        channel = snippet.get("channelTitle") or ""
+        desc = snippet.get("description") or ""
+        thumb = _thumbnail_url(snippet)
+        out.append(
+            {
+                "video_id": vid,
+                "title": title,
+                "channel": channel,
+                "description": desc,
+                "url": f"https://www.youtube.com/watch?v={vid}",
+                "thumbnail": thumb,
+            }
+        )
+        if len(out) >= max_results:
+            break
+
+    return out
