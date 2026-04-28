@@ -377,11 +377,13 @@ def start_session(student_id: str, course: str | None = None) -> dict[str, Any]:
     # Falls back to the raw topo sort if the cache hasn't been built yet.
     concepts: list[dict] = []
     node_ids: list[str] = []
+    concept_to_lesson: dict[str, str] = {}
     try:
         from server import _get_or_build_lesson_roadmap
 
         roadmap = _get_or_build_lesson_roadmap(student_id, course_id)
         for lesson in roadmap.get("lessons") or []:
+            lesson_id = str(lesson.get("lesson_id") or "")
             for c in lesson.get("concepts") or []:
                 cid = str(c.get("id") or "")
                 if not cid:
@@ -392,6 +394,8 @@ def start_session(student_id: str, course: str | None = None) -> dict[str, Any]:
                     "description": c.get("description") or "",
                 })
                 node_ids.append(cid)
+                if lesson_id:
+                    concept_to_lesson[cid] = lesson_id
     except Exception as exc:
         print(f"[adaptive_session] lesson roadmap unavailable for {course_id!r}: {exc}; falling back to raw topo sort")
 
@@ -442,6 +446,8 @@ def start_session(student_id: str, course: str | None = None) -> dict[str, Any]:
         "blocks_delivered": [],
         "knowledge_opened": False,
         "current_index": current_index,
+        "concept_to_lesson": concept_to_lesson,
+        "lesson_id": concept_to_lesson.get(node_id, ""),
     }
     SESSION_STORE[session_id] = session
     return _public_session(session)
@@ -578,6 +584,56 @@ Do not repeat content already covered. Build on what they said."""
     return {"action": "reply", "intent": intent, "reply": reply, **_public_session(session)}
 
 
+def _persist_lesson_session(
+    session: dict[str, Any],
+    *,
+    score: int,
+    passed: bool,
+    client: Any,
+) -> None:
+    """Upsert a row into `lesson_sessions` so the transcript survives session teardown.
+
+    Silent on failure — if the migration hasn't been applied or RLS blocks the write,
+    we log and move on rather than failing the lesson completion endpoint.
+    """
+    try:
+        concept = _concept_for(session, session["node_id"])
+        row = {
+            "session_id": session["session_id"],
+            "student_id": session["student"]["id"],
+            "course_id": session.get("course_id") or session.get("course") or "",
+            "lesson_id": session.get("lesson_id") or "",
+            "concept_id": session["node_id"],
+            "concept_name": str(concept.get("name") or concept.get("id") or ""),
+            "mode": session.get("mode"),
+            "score": score,
+            "passed": passed,
+            "transcript": session.get("transcript", []),
+            "metadata": {
+                "attempt_count": session.get("attempt_count", 0),
+                "blocks_delivered": session.get("blocks_delivered", []),
+            },
+            "started_at": _isoformat(session.get("created_at")),
+        }
+        client.table("lesson_sessions").upsert(row, on_conflict="session_id").execute()
+    except Exception as exc:
+        print(
+            f"[adaptive_session] failed to persist lesson_sessions row for "
+            f"session={session.get('session_id')!r}: {exc}"
+        )
+
+
+def _isoformat(epoch_seconds: float | None) -> str | None:
+    if not epoch_seconds:
+        return None
+    try:
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(float(epoch_seconds), tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
 def complete_lesson(session_id: str) -> dict[str, Any]:
     session = SESSION_STORE.get(session_id)
     if not session:
@@ -630,7 +686,10 @@ Return ONE JSON object and nothing else. Schema: {"score": <integer 0-5>}"""
         client=supabase,
     )
 
-    if score >= PASSING_SCORE:
+    passed = score >= PASSING_SCORE
+    _persist_lesson_session(session, score=score, passed=passed, client=supabase)
+
+    if passed:
         public = _public_session(session)
         progress = advance_roadmap_index(
             student_id=session["student"]["id"],

@@ -7,6 +7,7 @@ import ProfilePage from './pages/ProfilePage'
 import RoadmapPage from './pages/RoadmapPage'
 import CoursesPage from './pages/CoursesPage'
 import InteractiveLessonPage from './pages/InteractiveLessonPage'
+import LessonTranscriptPage from './pages/LessonTranscriptPage'
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
         <Route path="/roadmap/:courseId" element={<RoadmapPage />} />
         <Route path="/lesson" element={<InteractiveLessonPage />} />
         <Route path="/lesson/:lessonId/interactive" element={<InteractiveLessonPage />} />
+        <Route path="/lesson/transcript" element={<LessonTranscriptPage />} />
       </Routes>
     </PersonaProvider>
   )

@@ -1,6 +1,10 @@
 import { Link } from 'react-router-dom'
-import { MouseEvent, useEffect, useRef } from 'react'
-import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  HomeRoadmapConcept,
+  HomeRoadmapOutcome,
+  HomeRoadmapStatus,
+} from '../data/homeRoadmapPreview'
 
 type LearningRoadmapProps = {
   compact?: boolean
@@ -11,6 +15,79 @@ type LearningRoadmapProps = {
   startHereTo?: string
   viewFullTo?: string
   onStartHere?: (event: MouseEvent<HTMLAnchorElement>) => void
+  /**
+   * Builds the destination for the "View transcript" link on a completed concept.
+   * Return `null`/`undefined` to hide the link.
+   */
+  buildTranscriptHref?: (concept: HomeRoadmapConcept, outcome: HomeRoadmapOutcome) => string | null | undefined
+}
+
+function lessonDotClasses(status: HomeRoadmapStatus): string {
+  if (status === 'completed') return 'bg-primary text-white size-6'
+  if (status === 'current') return 'bg-primary text-white ring-4 ring-primary/20 size-6'
+  return 'bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600 size-6'
+}
+
+function ConceptRow({
+  concept,
+  href,
+}: {
+  concept: HomeRoadmapConcept
+  href?: string | null
+}) {
+  const isCompleted = concept.status === 'completed'
+  const isCurrent = concept.status === 'current'
+  const dot = (
+    <span
+      className={`relative z-10 flex shrink-0 items-center justify-center rounded-full size-4 ${
+        isCompleted
+          ? 'bg-primary/80 text-white'
+          : isCurrent
+            ? 'bg-primary text-white ring-2 ring-primary/20'
+            : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600'
+      }`}
+    >
+      {isCompleted ? (
+        <span className="material-symbols-outlined text-[10px] leading-none">check</span>
+      ) : isCurrent ? (
+        <span className="size-1.5 rounded-full bg-white" />
+      ) : (
+        <span className="size-1.5 rounded-full bg-slate-300 dark:bg-slate-500" />
+      )}
+    </span>
+  )
+
+  const label = (
+    <span
+      className={`text-sm ${
+        concept.status === 'upcoming'
+          ? 'text-slate-400 dark:text-slate-500'
+          : isCurrent
+            ? 'text-slate-900 dark:text-white font-semibold'
+            : 'text-slate-700 dark:text-slate-200'
+      }`}
+    >
+      {concept.name}
+    </span>
+  )
+
+  return (
+    <li className="flex items-center gap-3 py-1.5">
+      {dot}
+      <div className="flex-1 min-w-0 flex items-center justify-between gap-3">
+        {label}
+        {isCompleted && href ? (
+          <Link
+            to={href}
+            className="shrink-0 text-xs font-semibold text-primary hover:underline inline-flex items-center gap-1"
+          >
+            View
+            <span className="material-symbols-outlined text-sm leading-none">chevron_right</span>
+          </Link>
+        ) : null}
+      </div>
+    </li>
+  )
 }
 
 export default function LearningRoadmap({
@@ -21,9 +98,18 @@ export default function LearningRoadmap({
   startHereTo = '#',
   viewFullTo = '/roadmap',
   onStartHere,
+  buildTranscriptHref,
 }: LearningRoadmapProps) {
   const outcomes = outcomesProp ?? []
   const currentItemRef = useRef<HTMLDivElement | null>(null)
+
+  // Auto-expand the active lesson; let the user toggle the rest. Re-derive when
+  // outcomes change so a new active lesson opens even after a roadmap rebuild.
+  const activeId = useMemo(() => outcomes.find((o) => o.status === 'current')?.id, [outcomes])
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    if (activeId) setExpanded((prev) => ({ ...prev, [activeId]: true }))
+  }, [activeId])
 
   useEffect(() => {
     if (!scrollable || !currentItemRef.current) return
@@ -48,60 +134,83 @@ export default function LearningRoadmap({
   const list = (
     <div className="relative pl-1">
       <div className="absolute left-[11px] top-8 bottom-8 w-0 border-l-2 border-dashed border-slate-300 dark:border-slate-600" />
-      {outcomes.map((outcome) => (
-        <div
-          key={outcome.id}
-          ref={outcome.status === 'current' ? currentItemRef : undefined}
-          className={`relative flex gap-6 ${compact ? 'pb-6 last:pb-0' : 'pb-10 last:pb-0'}`}
-        >
+      {outcomes.map((outcome) => {
+        const concepts = outcome.concepts ?? []
+        const hasConcepts = concepts.length > 0
+        const isOpen = expanded[outcome.id] ?? false
+        return (
           <div
-            className={`relative z-10 flex shrink-0 items-center justify-center rounded-full ${
-              outcome.status === 'completed'
-                ? 'bg-primary text-white size-6'
-                : outcome.status === 'current'
-                  ? 'bg-primary text-white ring-4 ring-primary/20 size-6'
-                  : 'bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600 size-6'
-            }`}
+            key={outcome.id}
+            ref={outcome.status === 'current' ? currentItemRef : undefined}
+            className={`relative flex gap-6 ${compact ? 'pb-6 last:pb-0' : 'pb-10 last:pb-0'}`}
           >
-            {outcome.status === 'completed' ? (
-              <span className="material-symbols-outlined text-sm">check</span>
-            ) : outcome.status === 'current' ? (
-              <span className="size-2 rounded-full bg-white" />
-            ) : (
-              <span className="size-2 rounded-full bg-slate-300 dark:bg-slate-500" />
-            )}
-          </div>
-          <div className="flex-1 min-w-0 pt-0.5">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h3
-                  className={`font-bold font-display ${
-                    outcome.status === 'upcoming'
-                      ? 'text-slate-400 dark:text-slate-500'
-                      : 'text-slate-900 dark:text-white'
-                  } ${compact ? 'text-base' : 'text-lg'}`}
-                >
-                  {outcome.title}
-                </h3>
-                {outcome.subtext && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                    {outcome.subtext}
-                  </p>
+            <div className={`relative z-10 flex shrink-0 items-center justify-center rounded-full ${lessonDotClasses(outcome.status)}`}>
+              {outcome.status === 'completed' ? (
+                <span className="material-symbols-outlined text-sm">check</span>
+              ) : outcome.status === 'current' ? (
+                <span className="size-2 rounded-full bg-white" />
+              ) : (
+                <span className="size-2 rounded-full bg-slate-300 dark:bg-slate-500" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0 pt-0.5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3
+                      className={`font-bold font-display ${
+                        outcome.status === 'upcoming'
+                          ? 'text-slate-400 dark:text-slate-500'
+                          : 'text-slate-900 dark:text-white'
+                      } ${compact ? 'text-base' : 'text-lg'}`}
+                    >
+                      {outcome.title}
+                    </h3>
+                    {hasConcepts && (
+                      <button
+                        type="button"
+                        onClick={() => setExpanded((prev) => ({ ...prev, [outcome.id]: !isOpen }))}
+                        className="inline-flex items-center justify-center rounded-md text-slate-400 hover:text-primary hover:bg-primary/10 size-6 transition-colors"
+                        aria-expanded={isOpen}
+                        aria-label={isOpen ? 'Collapse concepts' : 'Expand concepts'}
+                      >
+                        <span className={`material-symbols-outlined text-lg leading-none transition-transform ${isOpen ? 'rotate-180' : ''}`}>
+                          expand_more
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                  {outcome.subtext && (
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                      {outcome.subtext}
+                    </p>
+                  )}
+                </div>
+                {outcome.status === 'current' && (
+                  <Link
+                    to={startHereTo}
+                    onClick={onStartHere}
+                    className="shrink-0 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-light transition-all shadow-md shadow-primary/20 inline-block"
+                  >
+                    Start here
+                  </Link>
                 )}
               </div>
-              {outcome.status === 'current' && (
-                <Link
-                  to={startHereTo}
-                  onClick={onStartHere}
-                  className="shrink-0 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-light transition-all shadow-md shadow-primary/20 inline-block"
-                >
-                  Start here
-                </Link>
+              {hasConcepts && isOpen && (
+                <ul className="mt-3 space-y-0.5 border-l-2 border-dotted border-slate-200 dark:border-slate-700 pl-4">
+                  {concepts.map((concept) => (
+                    <ConceptRow
+                      key={concept.id}
+                      concept={concept}
+                      href={buildTranscriptHref?.(concept, outcome) ?? undefined}
+                    />
+                  ))}
+                </ul>
               )}
             </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 

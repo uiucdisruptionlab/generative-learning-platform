@@ -2,19 +2,20 @@ import { MouseEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
-import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+import type { HomeRoadmapConcept, HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 import { usePersona } from '../contexts/PersonaContext'
 import {
   fetchStudentRoadmapData,
   startSession,
   type GeneratedRoadmap,
+  type GeneratedRoadmapConcept,
   type GeneratedRoadmapLesson,
   type RoadmapState,
 } from '../api/home'
 
 type RoadmapData = Awaited<ReturnType<typeof fetchStudentRoadmapData>>
 
-function stateToStatus(state: RoadmapState): HomeRoadmapOutcome['status'] {
+function stateToStatus(state: RoadmapState | undefined): HomeRoadmapOutcome['status'] {
   if (state === 'completed') return 'completed'
   if (state === 'active') return 'current'
   return 'upcoming'
@@ -27,6 +28,15 @@ function lessonSubtext(lesson: GeneratedRoadmapLesson): string | undefined {
   return `${count} concept${count === 1 ? '' : 's'}`
 }
 
+function toConcept(c: GeneratedRoadmapConcept): HomeRoadmapConcept {
+  return {
+    id: String(c.id ?? c.name ?? ''),
+    name: c.name ?? c.id ?? '',
+    description: c.description,
+    status: stateToStatus(c.state),
+  }
+}
+
 function makeLessonOutcomes(roadmap: GeneratedRoadmap | undefined): HomeRoadmapOutcome[] {
   const lessons = roadmap?.lessons ?? []
   return lessons.map((lesson) => ({
@@ -34,6 +44,7 @@ function makeLessonOutcomes(roadmap: GeneratedRoadmap | undefined): HomeRoadmapO
     title: lesson.title,
     status: stateToStatus(lesson.state),
     subtext: lessonSubtext(lesson),
+    concepts: (lesson.concepts ?? []).map(toConcept),
   }))
 }
 
@@ -109,6 +120,9 @@ export default function RoadmapPage() {
             outcomes={outcomes.length ? outcomes : []}
             startHereTo={activeLesson ? `/lesson?lesson_id=${encodeURIComponent(activeLesson.lesson_id)}` : '#'}
             onStartHere={handleStartHere}
+            buildTranscriptHref={(concept) =>
+              `/lesson/transcript?student_id=${encodeURIComponent(studentId)}&concept_id=${encodeURIComponent(concept.id)}`
+            }
           />
         )}
 

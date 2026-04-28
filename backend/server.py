@@ -1001,6 +1001,81 @@ def rebuild_student_lesson_roadmap(student_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+_LESSON_HISTORY_COLUMNS = (
+    "session_id, student_id, course_id, lesson_id, concept_id, concept_name, "
+    "mode, score, passed, started_at, completed_at, metadata"
+)
+
+
+@app.get("/lesson_history/{student_id}")
+def list_lesson_history(
+    student_id: str,
+    concept_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """List completed lesson sessions for a student, optionally filtered by concept_id.
+
+    Returns metadata only (no transcript). Use `/lesson_session/{session_id}` for the full log.
+    """
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        query = (
+            supabase.table("lesson_sessions")
+            .select(_LESSON_HISTORY_COLUMNS)
+            .eq("student_id", student_id)
+            .order("completed_at", desc=True)
+            .limit(limit)
+        )
+        if concept_id:
+            query = query.eq("concept_id", concept_id)
+        resp = query.execute()
+        return {
+            "student_id": student_id,
+            "concept_id": concept_id,
+            "sessions": list(resp.data or []),
+        }
+    except Exception as exc:
+        msg = str(exc)
+        if "lesson_sessions" in msg and ("Could not find" in msg or "PGRST205" in msg):
+            return {"student_id": student_id, "concept_id": concept_id, "sessions": []}
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=msg)
+
+
+@app.get("/lesson_session/{session_id}")
+def get_lesson_session(session_id: str) -> dict[str, Any]:
+    """Read a single completed lesson session, including the full transcript."""
+    from supabase_local import get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        resp = (
+            supabase.table("lesson_sessions")
+            .select("*")
+            .eq("session_id", session_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            raise HTTPException(status_code=404, detail="lesson session not found")
+        return rows[0]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        msg = str(exc)
+        if "lesson_sessions" in msg and ("Could not find" in msg or "PGRST205" in msg):
+            raise HTTPException(status_code=404, detail="lesson session not found")
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=msg)
+
+
 @app.get("/courses")
 def get_courses_endpoint() -> dict[str, Any]:
     from graphdb.neo4j_client import get_courses

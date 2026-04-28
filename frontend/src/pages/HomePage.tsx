@@ -2,7 +2,7 @@ import { MouseEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
-import type { HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+import type { HomeRoadmapConcept, HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
 import { usePersona } from '../contexts/PersonaContext'
 import {
   fetchHomeData,
@@ -120,6 +120,15 @@ function lessonStateToStatus(state: GeneratedRoadmapLesson['state']): HomeRoadma
   return 'upcoming'
 }
 
+function toConcept(c: GeneratedRoadmapConcept): HomeRoadmapConcept {
+  return {
+    id: String(c.id ?? c.name ?? ''),
+    name: c.name ?? c.id ?? '',
+    description: c.description,
+    status: lessonStateToStatus(c.state ?? 'locked'),
+  }
+}
+
 function makeLessonOutcomes(roadmap: GeneratedRoadmap | undefined): HomeRoadmapOutcome[] {
   const lessons = roadmap?.lessons ?? []
   if (!lessons.length) return []
@@ -138,6 +147,7 @@ function makeLessonOutcomes(roadmap: GeneratedRoadmap | undefined): HomeRoadmapO
           : conceptCount
             ? `${conceptCount} concept${conceptCount === 1 ? '' : 's'}`
             : undefined,
+      concepts: (lesson.concepts ?? []).map(toConcept),
     }
   })
 }
@@ -312,6 +322,9 @@ export default function HomePage() {
             startHereTo={activeLesson ? `/lesson?lesson_id=${encodeURIComponent(activeLesson.lesson_id)}` : homeRoadmapPath}
             viewFullTo={homeRoadmapPath}
             onStartHere={handleStartHere}
+            buildTranscriptHref={(concept) =>
+              `/lesson/transcript?student_id=${encodeURIComponent(studentId)}&concept_id=${encodeURIComponent(concept.id)}`
+            }
           />
         </section>
 
