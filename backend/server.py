@@ -544,16 +544,30 @@ def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | No
     return data
 
 
+def _student_has_srs_history(persona_id: str, lesson_id: str) -> bool:
+    try:
+        from lesson_generator import resolve_student_id
+        from srs import get_srs_record
+        from supabase_local import get_supabase_client
+        student_id = resolve_student_id(persona_id)
+        return get_srs_record(student_id, lesson_id, client=get_supabase_client()) is not None
+    except Exception as exc:
+        print(f"[get_lesson] SRS history check failed: {exc}")
+        return False
+
+
 @app.get("/lesson/{lesson_id}")
 def get_lesson(lesson_id: str, persona: str = Query(default="charles"), course: str | None = Query(default=None)):
     cached = _load_lesson_cache(persona, lesson_id, course)
-    if cached:
+    if cached and not _student_has_srs_history(persona, lesson_id):
         return cached
     try:
         return _generate_and_cache_lesson(lesson_id, persona, course)
     except Exception as exc:
         import traceback
         traceback.print_exc()
+        if cached:
+            return cached
         raise HTTPException(status_code=500, detail=str(exc))
 
 

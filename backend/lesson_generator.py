@@ -78,6 +78,7 @@ Output schema:
 
 Rules:
 - Tailor the depth, tone, and structure of every step to the learner profile provided.
+- If PRIOR PERFORMANCE data is present, follow its directive exactly — adjust difficulty, depth, and remediation accordingly.
 - Personalize examples and analogies to the learner's interests and goals/career direction whenever relevant.
 - Steps should flow logically: start with core concepts, then move to examples, then a summary.
 - Aim for exactly 3 steps.
@@ -135,6 +136,10 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
         "interests": [str(x) for x in interests if str(x).strip()],
         "learning_goals": goals,
     }
+
+
+def resolve_student_id(persona_id: str) -> str:
+    return _resolve_student_id(persona_id)
 
 
 def _resolve_student_id(persona_id: str) -> str:
@@ -345,7 +350,47 @@ def _get_lesson_from_cache(lesson_id: str, course: str) -> dict[str, Any]:
     raise ValueError(f"Lesson '{lesson_id}' not found in roadmap cache for course '{course}'.")
 
 
-def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict]) -> str:
+def _build_srs_context(srs_record: dict[str, Any] | None) -> str:
+    if not srs_record:
+        return ""
+    attempts = int(srs_record.get("attempts") or srs_record.get("repetitions") or 0)
+    if attempts == 0:
+        return ""
+    last_score = float(srs_record.get("last_score") or srs_record.get("score") or 0)
+    ease_factor = float(srs_record.get("ease_factor") or 2.5)
+    interval_days = int(srs_record.get("interval_days") or 1)
+
+    if ease_factor < 1.8 or last_score < 3:
+        assessment = "struggling"
+        directive = (
+            "Remediate — use simpler language, more concrete examples, and rebuild from "
+            "first principles. Do not assume prior understanding carries over."
+        )
+    elif ease_factor >= 2.8 and last_score >= 4:
+        assessment = "strong"
+        directive = (
+            "Student has a strong grasp. Go deeper, introduce nuance, and include a more "
+            "challenging question that tests edge cases."
+        )
+    else:
+        assessment = "progressing"
+        directive = (
+            "Student is making steady progress. Reinforce core concepts and address any "
+            "gaps with targeted examples."
+        )
+
+    return (
+        f"PRIOR PERFORMANCE ON THIS LESSON:\n"
+        f"- Attempts: {attempts}\n"
+        f"- Last score: {last_score:.0f}/5\n"
+        f"- Ease factor: {ease_factor:.2f} (2.5 = neutral; lower = harder to retain)\n"
+        f"- Days until next scheduled review: {interval_days}\n"
+        f"- Assessment: {assessment}\n"
+        f"→ {directive}"
+    )
+
+
+def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict], srs_context: str = "") -> str:
     concepts_text = "\n".join(
         f"- {c['name']}: {c.get('description', '')}" for c in lesson.get("concepts", [])
     )
@@ -355,6 +400,8 @@ def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, vide
         else "[No lecture excerpts loaded — use CONCEPTS only. Do not tell the learner to install software.]"
     )
     videos_text = json.dumps(videos, indent=2) if videos else "[]"
+
+    srs_section = f"\n\n{srs_context}" if srs_context else ""
 
     return f"""
 LESSON TO GENERATE:
@@ -372,7 +419,7 @@ Learning style: {persona['learning_style']}
 Hours available per week: {persona['hours_per_week']}
 Interests: {json.dumps(persona.get('interests', []), ensure_ascii=False)}
 Learning goals: {json.dumps(persona.get('learning_goals', {}), ensure_ascii=False)}
-Additional notes: {persona['notes']}
+Additional notes: {persona['notes']}{srs_section}
 
 SOURCE MATERIAL (raw lecture chunks):
 {chunks_text}
@@ -413,6 +460,16 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     persona = _load_persona_from_supabase(persona_id, course_override=course_override)
     course = course_override or persona.get("course", "accounting")
     lesson = _get_lesson_from_cache(lesson_id, course)
+
+    srs_record: dict[str, Any] | None = None
+    student_id = persona.get("student_id", "")
+    if student_id:
+        try:
+            from srs import get_srs_record
+            srs_record = get_srs_record(student_id, lesson_id, client=get_supabase_client())
+        except Exception as exc:
+            print(f"[lesson_generator] SRS lookup skipped: {exc}")
+    srs_context = _build_srs_context(srs_record)
 
     chunk_ids = lesson.get("chunk_ids", [])
     if chunk_ids:
@@ -495,6 +552,8 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
         "chunks_meta": chunks_meta,
         "videos": videos,
         "video_search_error": video_search_error,
+        "srs_record": srs_record,
+        "srs_context": srs_context,
     }
 
 
@@ -504,8 +563,9 @@ def generate_lesson(lesson_id: str, persona_id: str, course_override: str | None
     chunks = bundle["chunks"]
     persona = bundle["persona"]
     videos = bundle["videos"]
+    srs_context = bundle.get("srs_context", "")
 
-    prompt = _build_prompt(lesson, chunks, persona, videos)
+    prompt = _build_prompt(lesson, chunks, persona, videos, srs_context)
 
     client = create_bedrock_runtime_client(region=AWS_REGION)
     response = client.converse(
