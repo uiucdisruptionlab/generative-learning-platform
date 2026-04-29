@@ -467,6 +467,20 @@ function isSessionGoneError(message: string): boolean {
   return /session not found/i.test(message)
 }
 
+/** Adaptive session stores each activity block in `transcript` as plain text (`meta.kind === 'block'`)
+ * while also returning it as `pending_widget` for Quick check (rich UI). Showing both repeats the same content.
+ * Completed blocks also stayed visible after Continue, so the rail stacked duplicate summaries next to the next check.
+ * Activity blocks belong only in Quick check — keep the walkthrough for tutor/student dialogue (knowledge check, etc.). */
+function transcriptForWalkthrough(transcript: InteractiveTranscriptEntry[]): InteractiveTranscriptEntry[] {
+  return transcript.filter((entry) => {
+    const kind =
+      entry.meta && typeof entry.meta === 'object' && 'kind' in entry.meta
+        ? String((entry.meta as { kind?: unknown }).kind ?? '')
+        : ''
+    return kind !== 'block'
+  })
+}
+
 function normalizePendingWidget(raw: unknown): PendingWidget | null {
   if (!raw || typeof raw !== 'object') return null
   const w = raw as { type?: string; payload?: unknown }
@@ -598,6 +612,7 @@ export default function InteractiveLessonPage() {
   }, [lessonId, persona, courseOverride, sessionOverride])
 
   const pending = state ? normalizePendingWidget(state.pending_widget as unknown) : null
+  const walkthroughEntries = state ? transcriptForWalkthrough(state.transcript) : []
 
   return (
     <AppLayout
@@ -700,7 +715,7 @@ export default function InteractiveLessonPage() {
                 <span className="material-symbols-outlined text-primary text-2xl">route</span>
                 Your walkthrough
               </h3>
-              {state.transcript.map((entry, idx) => (
+              {walkthroughEntries.map((entry, idx) => (
                 <TranscriptBlock key={idx} entry={entry} />
               ))}
               <div ref={bottomRef} />
