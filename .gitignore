@@ -6,7 +6,12 @@ backend/lesson_cache/
 .claude/settings.local.json
 .vscode/settings.json
 
+
 # Python
+.venv/
+venv/
+env/
+
 **/__pycache__/
 *.py[cod]
 *$py.class

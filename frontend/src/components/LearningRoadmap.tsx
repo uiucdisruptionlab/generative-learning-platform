@@ -219,14 +219,14 @@ export default function LearningRoadmap({
   return (
     <div>
       {scrollable ? (
-        <div className="max-h-[min(11rem,27vh)] overflow-y-auto overscroll-y-contain scroll-smooth rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-stone-50/50 dark:bg-slate-950/30 px-3 py-2 sm:px-4">
+        <div className="max-h-[min(11rem,27vh)] overflow-y-auto overscroll-y-contain scroll-smooth rounded-xl border border-industrial/45 dark:border-industrial/30 bg-stone-50/50 dark:bg-slate-950/30 px-3 py-2 sm:px-4">
           {body}
         </div>
       ) : (
         body
       )}
       {showViewFullLink && (
-        <div className={`mt-6 pl-8 ${scrollable ? 'border-t border-emerald-200/40 dark:border-emerald-800/30 pt-4' : ''}`}>
+        <div className={`mt-6 pl-8 ${scrollable ? 'border-t border-industrial/35 dark:border-industrial/25 pt-4' : ''}`}>
           <Link
             to={viewFullTo}
             className="text-sm font-semibold text-primary hover:underline inline-flex items-center gap-1"

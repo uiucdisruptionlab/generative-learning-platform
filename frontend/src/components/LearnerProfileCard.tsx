@@ -50,7 +50,7 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Header Card with Avatar and Basic Info */}
-      <div className="rounded-2xl bg-gradient-to-br from-white via-emerald-50/30 to-white dark:from-slate-900 dark:via-slate-800/50 dark:to-slate-900 border-2 border-primary/20 dark:border-primary/30 shadow-soft p-8">
+      <div className="rounded-2xl bg-gradient-to-br from-white via-storm-300/35 to-white dark:from-slate-900 dark:via-slate-800/50 dark:to-slate-900 border-2 border-industrial/40 dark:border-industrial/35 shadow-soft p-8">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
           {/* Avatar */}
           <div className="relative">
@@ -104,9 +104,9 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Learning Goals */}
-        <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-emerald-200/50 dark:border-emerald-800/30 shadow-soft p-6">
+        <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-industrial/40 dark:border-industrial/30 shadow-soft p-6">
           <div className="flex items-center gap-2 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-primary">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-storm-300/60 dark:bg-storm-700/25 text-primary">
               <span className="material-symbols-outlined">target</span>
             </div>
             <h2 className="text-xl font-bold font-display text-slate-900 dark:text-white">
@@ -118,7 +118,7 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
               profile.learning_goals.map((goal, index) => (
                 <div
                   key={index}
-                  className="flex items-start gap-3 p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-900/20 border border-emerald-200/50 dark:border-emerald-800/30"
+                  className="flex items-start gap-3 p-3 rounded-xl bg-storm-300/45 dark:bg-storm-700/20 border border-industrial/35 dark:border-industrial/25"
                 >
                   <span className="material-symbols-outlined text-primary mt-0.5">check_circle</span>
                   <p className="text-sm text-slate-700 dark:text-slate-300 flex-1">{goal}</p>
@@ -171,9 +171,9 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
         </div>
 
         {/* Interests */}
-        <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-teal-200/50 dark:border-teal-800/30 shadow-soft p-6">
+        <div className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-arches/40 dark:border-arches/25 shadow-soft p-6">
           <div className="flex items-center gap-2 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 dark:bg-teal-900/30 text-canvas-green">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-soft-teal dark:bg-patina/15 text-canvas-green">
               <span className="material-symbols-outlined">interests</span>
             </div>
             <h2 className="text-xl font-bold font-display text-slate-900 dark:text-white">
@@ -185,7 +185,7 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
               profile.interests.map((interest, index) => (
                 <span
                   key={index}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 dark:bg-teal-900/30 px-3 py-1.5 text-sm font-medium text-canvas-green border border-teal-200/50 dark:border-teal-800/30"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-soft-teal dark:bg-patina/15 px-3 py-1.5 text-sm font-medium text-canvas-green border border-arches/35 dark:border-arches/20"
                 >
                   <span className="material-symbols-outlined text-base">star</span>
                   {interest}
