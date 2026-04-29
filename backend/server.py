@@ -459,6 +459,85 @@ def _concept_display_sort_key(
     )
 
 
+LATE_LESSON_KEYWORDS = {
+    "administration",
+    "allowed reference",
+    "cheat sheet",
+    "course wrap",
+    "exam",
+    "final",
+    "practice exam",
+    "review",
+    "wrap up",
+    "wrap-up",
+}
+
+
+def _lesson_source_order(
+    lesson: dict[str, Any],
+    concept_order: dict[str, tuple[int, int, str]],
+) -> tuple[int, int, str]:
+    orders = [
+        concept_order[str(concept.get("id") or "")]
+        for concept in lesson.get("concepts") or []
+        if isinstance(concept, dict) and str(concept.get("id") or "") in concept_order
+    ]
+    if not orders:
+        return (10**9, 10**9, str(lesson.get("title") or "").lower())
+    first = min(orders)
+    return (int(first[0]), int(first[1]), str(first[2]))
+
+
+def _looks_like_late_lesson(lesson: dict[str, Any]) -> bool:
+    text_parts = [
+        str(lesson.get("title") or ""),
+        str(lesson.get("summary") or ""),
+    ]
+    text_parts.extend(
+        str(concept.get("name") or "")
+        for concept in lesson.get("concepts") or []
+        if isinstance(concept, dict)
+    )
+    haystack = " ".join(text_parts).lower()
+    return any(
+        re.search(rf"\b{re.escape(keyword).replace(r'\ ', r'\s+')}\b", haystack)
+        for keyword in LATE_LESSON_KEYWORDS
+    )
+
+
+def _normalize_lesson_sequence(roadmap: dict, course_id: str) -> dict:
+    lessons = [
+        lesson for lesson in roadmap.get("lessons") or []
+        if isinstance(lesson, dict)
+    ]
+    if len(lessons) <= 1:
+        return roadmap
+
+    concept_order = _lesson_concept_order(course_id)
+    ordered_lessons = sorted(
+        enumerate(lessons),
+        key=lambda item: (
+            1 if _looks_like_late_lesson(item[1]) else 0,
+            *_lesson_source_order(item[1], concept_order),
+            item[0],
+        ),
+    )
+    normalized_lessons = [lesson for _, lesson in ordered_lessons]
+    node_ids = [
+        str(concept.get("id") or "")
+        for lesson in normalized_lessons
+        for concept in lesson.get("concepts") or []
+        if isinstance(concept, dict) and concept.get("id")
+    ]
+
+    return {
+        **roadmap,
+        "lessons": normalized_lessons,
+        "lesson_count": len(normalized_lessons),
+        "node_ids": node_ids or list(roadmap.get("node_ids") or []),
+    }
+
+
 def _get_or_build_lesson_roadmap(
     student_id: str,
     course_id: str,
@@ -472,13 +551,13 @@ def _get_or_build_lesson_roadmap(
     if not force_refresh:
         cached = _load_lesson_roadmap_cache(student_id)
         if cached and cached.get("lessons") and cached.get("course_id") == course_id:
-            return cached
+            return _normalize_lesson_sequence(cached, course_id)
     from graphdb.roadmap_builder import build_course_lesson_roadmap
 
     fresh = build_course_lesson_roadmap(course_id, refine_with_llm=True)
     if fresh.get("lessons"):
         _save_lesson_roadmap_cache(student_id, fresh)
-    return fresh
+    return _normalize_lesson_sequence(fresh, course_id)
 
 
 def _course_from_student(student: dict[str, Any]) -> str:
