@@ -5,6 +5,7 @@ import os
 import re
 import time
 import uuid
+from difflib import SequenceMatcher
 from typing import Any, Literal
 
 from bedrock.client import create_bedrock_runtime_client
@@ -25,10 +26,28 @@ AWS_REGION = os.getenv("AWS_REGION", os.getenv(
     "AWS_DEFAULT_REGION", "us-east-1"))
 
 BLOCKS_PER_CONCEPT = 3
+# One block per concept in this order — avoids three MCQs when preferred_formats is empty.
+_BLOCK_TYPE_CYCLE: tuple[Literal["video", "flashcard", "mcq"], ...] = (
+    "video",
+    "flashcard",
+    "mcq",
+)
 SESSION_STORE: dict[str, dict[str, Any]] = {}
 _SESSION_MAX = 200
 
 Intent = Literal["question", "attempt", "done"]
+
+# Knowledge check: flag answers that are mostly a contiguous copy of lesson + generated blocks
+_MIN_ANSWER_LEN_PASTE_CHECK = 22
+_MIN_CONTIGUOUS_MATCH = 48
+_MIN_MATCH_FRACTION = 0.52
+
+_PASTE_NUDGE = (
+    "That answer looks very close to the wording from the lesson or activities. "
+    "In your own words, try again: explain the idea, apply it to a short example, "
+    "or say what would be different if a key part changed. "
+    "A one-line quote is fine, but the rest should be you."
+)
 
 
 def _prune_sessions() -> None:
@@ -239,7 +258,38 @@ def _source_text(chunks: list[dict[str, Any]]) -> str:
     return text or "No source excerpts were found for this concept."
 
 
-def _blocks_delivered_text(blocks: list[str]) -> str:
+def _block_snapshot_for_prompt(block_type: str, content: dict[str, Any]) -> str:
+    """Compact text so the model can avoid repeating the same teaching angle."""
+    max_len = 700
+    if block_type == "video":
+        s = (
+            f"[Video] search_query={content.get('search_query', '')!r}; "
+            f"why={content.get('why', '')}"
+        )
+    elif block_type == "flashcard":
+        s = f"[Flashcard] front: {content.get('front', '')}\nback: {content.get('back', '')}"
+    else:
+        opts = content.get("options")
+        opts_txt = ""
+        if isinstance(opts, list):
+            opts_txt = "; ".join(str(o) for o in opts[:4])
+        s = (
+            f"[MCQ] question: {content.get('question', '')}\n"
+            f"options: {opts_txt}\ncorrect: {content.get('correct', '')}; "
+            f"explanation: {content.get('explanation', '')}"
+        )
+    s = s.strip()
+    if len(s) > max_len:
+        return s[:max_len] + "…"
+    return s
+
+
+def _blocks_delivered_detail(session: dict[str, Any]) -> str:
+    snapshots = session.get("block_snapshots") or []
+    if snapshots:
+        lines = [f"{i + 1}. {snap}" for i, snap in enumerate(snapshots)]
+        return "\n".join(lines)
+    blocks = session.get("blocks_delivered") or []
     if not blocks:
         return "No content has been delivered yet."
     labels = {
@@ -250,21 +300,9 @@ def _blocks_delivered_text(blocks: list[str]) -> str:
     return "\n".join(f"- {labels.get(block, block)}" for block in blocks)
 
 
-def _normalize_block_type(raw: str) -> Literal["video", "flashcard", "mcq"]:
-    text = raw.lower()
-    if "video" in text:
-        return "video"
-    if "flash" in text or "card" in text:
-        return "flashcard"
-    return "mcq"
-
-
 def _next_block_type(session: dict[str, Any]) -> Literal["video", "flashcard", "mcq"]:
-    formats = session["student"].get("preferred_formats") or []
     idx = int(session.get("block_index") or 0)
-    if idx < len(formats):
-        return _normalize_block_type(str(formats[idx]))
-    return "mcq"
+    return _BLOCK_TYPE_CYCLE[idx % len(_BLOCK_TYPE_CYCLE)]
 
 
 def _system_prompt(session: dict[str, Any], task: str) -> str:
@@ -292,10 +330,11 @@ Here is the source material for this concept:
 Stay grounded in this material. Do not invent facts not present above.
 All questions and explanations must reference this specific material.
 
-You have already delivered the following content blocks for this concept:
-{_blocks_delivered_text(session.get("blocks_delivered", []))}
-
-Do NOT repeat or regenerate any of the above. Move forward.
+You have already delivered the following content for this concept (exact prior outputs — do not repeat the same terms, questions, or teaching angle):
+---
+{_blocks_delivered_detail(session)}
+---
+Do NOT repeat or paraphrase the same core fact, definition, or question as above. Each new block must add a distinct angle (e.g. different sub-idea, term, or assessment focus).
 
 {task}""".strip()
 
@@ -314,14 +353,14 @@ Format as JSON only, no other text:
   "why": "one sentence explaining why this suits this specific student"
 }}"""
     if block_type == "flashcard":
-        return f"""Generate a flashcard for the most important term or idea in {concept_name} not yet covered above.
+        return f"""Generate a flashcard for an important term or idea in {concept_name} that is not already covered in the prior blocks listed above (different term or angle).
 Format as JSON only, no other text:
 {{
   "front": "term or short question",
   "back": "definition or answer written for a {confidence} student"
 }}"""
     return f"""Generate a multiple choice question testing understanding of {concept_name}.
-Ground the question in the source material above. Do not ask a generic question about the topic.
+Ground the question in the source material above. Ask about a different detail or inference than any prior block; do not ask a generic or duplicate question.
 Format as JSON only, no other text:
 {{
   "question": "...",
@@ -444,6 +483,7 @@ def start_session(student_id: str, course: str | None = None) -> dict[str, Any]:
         "attempt_count": 0,
         "block_index": 0,
         "blocks_delivered": [],
+        "block_snapshots": [],
         "knowledge_opened": False,
         "current_index": current_index,
         "concept_to_lesson": concept_to_lesson,
@@ -487,6 +527,9 @@ def generate_block(session_id: str) -> dict[str, Any]:
     session["messages"].append(trigger)
     session["messages"].append({"role": "assistant", "content": response_text})
     session["blocks_delivered"].append(block_type)
+    session.setdefault("block_snapshots", []).append(
+        _block_snapshot_for_prompt(block_type, parsed)
+    )
     session["block_index"] += 1
 
     transcript_text = _transcript_text(block_type, parsed)
@@ -511,6 +554,53 @@ def _transcript_text(block_type: str, content: dict[str, Any]) -> str:
     if block_type == "flashcard":
         return f"{content.get('front', '')}\n\n{content.get('back', '')}".strip()
     return f"{content.get('question', '')}\n\n{content.get('explanation', '')}".strip()
+
+
+def _norm_for_overlap(s: str) -> str:
+    return re.sub(r"\s+", " ", s.strip().lower())
+
+
+def _knowledge_check_corpus(session: dict[str, Any]) -> str:
+    """Text we treat as the lesson: chunks + all generated block snapshots / block transcript."""
+    parts: list[str] = [str(_source_text(session.get("chunks", [])) or "")]
+    for snap in session.get("block_snapshots", []):
+        if isinstance(snap, str) and snap.strip():
+            parts.append(snap)
+    for entry in session.get("transcript", []):
+        meta = entry.get("meta") or {}
+        if not isinstance(meta, dict) or meta.get("kind") != "block":
+            continue
+        bt = meta.get("block_type")
+        cont = meta.get("content")
+        if isinstance(cont, dict) and isinstance(bt, str):
+            parts.append(_transcript_text(bt, cont))
+        else:
+            parts.append(str(entry.get("content") or ""))
+    return _norm_for_overlap(" ".join(parts))
+
+
+def _suspected_paste_of_lesson(answer: str, session: dict[str, Any]) -> bool:
+    """Heuristic: long contiguous match between answer and lesson+blocks text."""
+    a = _norm_for_overlap(answer)
+    if len(a) < _MIN_ANSWER_LEN_PASTE_CHECK:
+        return False
+    c = _knowledge_check_corpus(session)
+    if len(c) < 20:
+        return False
+    c_cap = c if len(c) <= 120_000 else c[:120_000]
+    if len(a) >= 20 and a in c_cap:
+        return True
+    m = SequenceMatcher(
+        None,
+        a,
+        c_cap,
+        autojunk=False,
+    ).find_longest_match(0, len(a), 0, len(c_cap))
+    need = max(
+        _MIN_CONTIGUOUS_MATCH,
+        int(_MIN_MATCH_FRACTION * len(a)),
+    )
+    return m.size >= need
 
 
 def classify_intent(message: str, concept_name: str) -> Intent:
@@ -540,9 +630,11 @@ def lesson_message(session_id: str, message: str | None = None) -> dict[str, Any
 
     if not message or not message.strip():
         task = f"""All content blocks for this concept have been delivered.
-Ask the student one open-ended question to check their understanding of {concept_name}.
-The question must be specific to the source material, not a generic comprehension check. Do not let it be a mcq, flashcard type question, or anything. Ask something that helps you evaluate their understanding.
-Keep the question concise."""
+Ask ONE open-ended question to check understanding of {concept_name}.
+The question must be specific to the source material.
+Do NOT ask for a rote definition, a list of terms, or anything the student could answer by copying a single paragraph from the lesson.
+Prefer: a short what-if, a compare/contrast, an application to a new situation, or "what would go wrong if…" — so they must paraphrase or reason, not paste.
+Do not use MCQ/flashcard format. Keep the question concise (2–4 sentences max)."""
         trigger = {"role": "user", "content": "Start the knowledge check."}
         reply = _call_converse(_system_prompt(
             session, task), session["messages"] + [trigger], max_tokens=500)
@@ -566,12 +658,30 @@ Keep the question concise."""
 Do not re-explain the entire concept. Address only what they asked.
 After answering, prompt them to continue with the knowledge check."""
     else:
+        if _suspected_paste_of_lesson(user_text, session):
+            reply = _PASTE_NUDGE
+            session["messages"].append(
+                {"role": "assistant", "content": reply})
+            session["transcript"].append(
+                {
+                    "role": "assistant",
+                    "content": reply,
+                    "meta": {
+                        "kind": "knowledge_check",
+                        "intent": intent,
+                        "paste_nudge": True,
+                    },
+                }
+            )
+            return {"action": "reply", "intent": intent, "reply": reply, **_public_session(session)}
+
         session["attempt_count"] += 1
         task = """The student has attempted to answer your question. Their response is in the conversation above.
 Evaluate their understanding specifically against the source material.
+If their answer is mostly copied from the lesson text without added reasoning, say so gently and ask them to restate in their own words or use a small new example.
 Tell them clearly what they got right and what they missed or got wrong.
 If they have shown sufficient understanding, confirm it and ask them to type "done" to move on.
-If they have not, ask a targeted follow-up question to guide them toward the right understanding.
+If they have not, ask a targeted follow-up that requires application (not a definition they can paste).
 Do not repeat content already covered. Build on what they said."""
         if session["attempt_count"] >= 3:
             task += "\nIf they still have not shown mastery, suggest revisiting the most relevant prerequisite and do not advance."
@@ -647,6 +757,7 @@ Score the student's demonstrated understanding of the concept from 0 to 5 based 
 3: Basic understanding, some gaps remain
 4: Solid understanding, minor gaps
 5: Strong understanding, could explain it to someone else
+If the student's substantive answers are largely copied verbatim from the source material or prior tutor lines (no added reasoning, example, or paraphrase), cap the score at 2.
 Return ONE JSON object and nothing else. Schema: {"score": <integer 0-5>}"""
     transcript_lines = [
         f"{m.get('role', '?')}: {m.get('content', '')}"
@@ -710,4 +821,5 @@ Return ONE JSON object and nothing else. Schema: {"score": <integer 0-5>}"""
     session["mode"] = "retry"
     session["block_index"] = 0
     session["blocks_delivered"] = []
+    session["block_snapshots"] = []
     return {"action": "retry", "score": score, "srs_record": srs_record, **_public_session(session)}
