@@ -402,6 +402,63 @@ def _save_lesson_roadmap_cache(student_id: str, data: dict) -> None:
         print(f"[server] failed to write roadmap_cache for student {student_id!r}: {exc}")
 
 
+def _lesson_concept_order(course_id: str) -> dict[str, tuple[int, int, str]]:
+    """Best-effort source order for concepts in the lesson roadmap."""
+    try:
+        from graphdb.neo4j_client import get_lecture_grouped_concepts
+
+        order: dict[str, tuple[int, int, str]] = {}
+        for lecture_index, lecture in enumerate(get_lecture_grouped_concepts(course_id)):
+            for concept in lecture.get("concepts") or []:
+                cid = str(concept.get("id") or "")
+                if not cid:
+                    continue
+                order.setdefault(
+                    cid,
+                    (
+                        lecture_index,
+                        int(concept.get("chunk_order") or 0),
+                        str(concept.get("name") or cid).lower(),
+                    ),
+                )
+        return order
+    except Exception as exc:
+        print(f"[server] failed to load concept order for course {course_id!r}: {exc}")
+        return {}
+
+
+def _concept_display_sort_key(
+    lesson_title: str,
+    concept: dict[str, Any],
+    order: dict[str, tuple[int, int, str]],
+) -> tuple[int, int, int, str]:
+    stopwords = {"a", "an", "and", "for", "in", "of", "on", "the", "to", "with"}
+
+    def tokens(value: str) -> set[str]:
+        words = re.sub(r"[^a-z0-9\s]", " ", value.lower()).split()
+        normalized = {
+            word[:-1] if len(word) > 3 and word.endswith("s") else word
+            for word in words
+            if word not in stopwords
+        }
+        return {word for word in normalized if word}
+
+    title_tokens = tokens(lesson_title)
+    concept_name = str(concept.get("name") or concept.get("id") or "")
+    concept_tokens = tokens(concept_name)
+    title_related = bool(title_tokens & concept_tokens)
+    source_order = order.get(
+        str(concept.get("id") or ""),
+        (10**9, 10**9, concept_name.lower()),
+    )
+    return (
+        0 if title_related else 1,
+        int(source_order[0]),
+        int(source_order[1]),
+        str(source_order[2]),
+    )
+
+
 def _get_or_build_lesson_roadmap(
     student_id: str,
     course_id: str,
@@ -900,6 +957,7 @@ def generate_student_roadmap(student_id: str) -> dict[str, Any]:
         roadmap = _get_or_build_lesson_roadmap(student_id, course_id)
         lessons = roadmap.get("lessons") or []
         node_ids: list[str] = list(roadmap.get("node_ids") or [])
+        concept_order = _lesson_concept_order(course_id)
 
         position = get_roadmap_position(student_id, course_id=course_id, client=supabase)
         current_index = int(position.get("current_index") or 0)
@@ -947,7 +1005,14 @@ def generate_student_roadmap(student_id: str) -> dict[str, Any]:
                 "summary": str(lesson.get("summary") or ""),
                 "lecture_ids": list(lesson.get("lecture_ids") or []),
                 "state": lesson_state,
-                "concepts": ec,
+                "concepts": sorted(
+                    ec,
+                    key=lambda c: _concept_display_sort_key(
+                        str(lesson.get("title") or ""),
+                        c,
+                        concept_order,
+                    ),
+                ),
             })
 
         return {
