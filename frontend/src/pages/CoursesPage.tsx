@@ -8,7 +8,7 @@ type CoursesData = Awaited<ReturnType<typeof fetchCoursesData>>
 
 const GRADIENTS = [
   'from-rose-200 to-red-100 dark:from-rose-800/60 dark:to-red-900/40',
-  'from-primary/45 to-emerald-300/70 dark:from-primary/50 dark:to-emerald-400/50',
+  'from-illini-blue/40 to-arches/45 dark:from-illini-blue/45 dark:to-arches/40',
   'from-amber-200 to-amber-100 dark:from-amber-800/60 dark:to-amber-900/40',
   'from-violet-200 to-purple-100 dark:from-violet-800/60 dark:to-purple-900/40',
   'from-blue-200 to-sky-100 dark:from-blue-800/60 dark:to-sky-900/40',
@@ -99,7 +99,7 @@ export default function CoursesPage() {
             return (
             <div
               key={course.id}
-              className={`group bg-white/95 dark:bg-slate-900/95 rounded-2xl border-2 shadow-[0_4px_20px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(44,89,38,0.12)] hover:-translate-y-1.5 hover:border-primary/50 transition-all duration-500 overflow-hidden flex flex-col ${
+              className={`group bg-white/95 dark:bg-slate-900/95 rounded-2xl border-2 shadow-[0_4px_20px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgba(255,95,5,0.14)] hover:-translate-y-1.5 hover:border-primary/50 transition-all duration-500 overflow-hidden flex flex-col ${
                 active
                   ? 'border-primary/60 dark:border-primary/60 ring-2 ring-primary/20'
                   : 'border-primary/20 dark:border-primary/30'

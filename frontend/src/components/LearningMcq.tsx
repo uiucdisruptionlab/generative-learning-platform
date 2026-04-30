@@ -51,11 +51,11 @@ export default function LearningMcq({
 
             if (!answered) {
               optionClass +=
-                'border-amber-200/80 dark:border-amber-800/40 bg-white dark:bg-slate-800/50 text-slate-800 dark:text-slate-100 hover:border-primary/50 hover:bg-amber-50/50 dark:hover:bg-slate-800 cursor-pointer'
+                'border-amber-200/80 dark:border-amber-800/40 bg-white dark:bg-slate-800/50 text-slate-800 dark:text-slate-100 hover:border-primary/50 hover:bg-storm-300/40 dark:hover:bg-slate-800 cursor-pointer'
             } else {
               if (isCorrectOpt) {
                 optionClass +=
-                  'border-primary bg-emerald-50 dark:bg-emerald-950/35 text-slate-900 dark:text-white ring-2 ring-primary/30'
+                  'border-primary bg-storm-300/55 dark:bg-storm-700/30 text-slate-900 dark:text-white ring-2 ring-primary/30'
               } else if (picked) {
                 optionClass += 'border-red-400 dark:border-red-500 bg-red-50/90 dark:bg-red-950/25 text-slate-900 dark:text-slate-100'
               } else {

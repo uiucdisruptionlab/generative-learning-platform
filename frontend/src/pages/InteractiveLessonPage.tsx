@@ -81,7 +81,7 @@ function McqWidget({
               onClick={() => setIdx(i)}
               className={`w-full text-left px-4 py-3 rounded-xl border-2 text-sm transition-all ${
                 show && isCorrect
-                  ? 'border-primary bg-emerald-50 dark:bg-emerald-900/20'
+                  ? 'border-primary bg-storm-300/55 dark:bg-storm-700/25'
                   : show && selected && !isCorrect
                   ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
                   : selected
@@ -366,7 +366,7 @@ function stepBadge(stepType: string): { label: string; icon: string; color: stri
     return {
       label: 'Summary',
       icon: 'summarize',
-      color: 'text-primary bg-emerald-50 dark:bg-emerald-900/20',
+      color: 'text-primary bg-storm-300/55 dark:bg-storm-700/25',
     }
   }
   return {
@@ -389,7 +389,7 @@ function UserTurn({ content }: { content: string }) {
   if (content.startsWith('[Completed activity:')) {
     return (
       <div className="flex justify-center py-1">
-        <span className="text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-primary border border-primary/20">
+        <span className="text-xs font-medium px-3 py-1.5 rounded-full bg-storm-300/55 dark:bg-storm-700/30 text-primary border border-primary/20">
           Activity completed
         </span>
       </div>
@@ -431,7 +431,7 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
     return (
       <section className="rounded-2xl bg-primary/5 dark:bg-primary/10 border-2 border-primary/20 p-6 shadow-soft">
         <span
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold mb-4 text-primary bg-emerald-50 dark:bg-emerald-900/20`}
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold mb-4 text-primary bg-storm-300/55 dark:bg-storm-700/25`}
         >
           <span className="material-symbols-outlined text-sm">menu_book</span>
           Overview
@@ -482,7 +482,7 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
 
   if (kind === 'closing') {
     return (
-      <section className="rounded-2xl border-2 border-emerald-200/80 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/25 p-6 shadow-soft">
+      <section className="rounded-2xl border-2 border-industrial/45 dark:border-industrial/35 bg-storm-300/45 dark:bg-storm-700/20 p-6 shadow-soft">
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-primary">celebration</span>
           <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Wrap-up</h3>
@@ -723,7 +723,7 @@ export default function InteractiveLessonPage() {
       action={
         <Link
           to="/roadmap"
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-white hover:border-primary/60 hover:text-primary dark:hover:bg-slate-900 transition-colors shadow-sm"
+          className="inline-flex items-center gap-2 rounded-xl border-2 border-white/70 bg-white/95 dark:bg-slate-900/90 dark:border-slate-600 px-4 py-2 text-sm font-semibold text-illini-blue dark:text-slate-100 hover:bg-white hover:border-primary hover:text-primary dark:hover:bg-slate-900 transition-colors shadow-sm"
           aria-label="Exit lesson and return to roadmap"
         >
           <span className="material-symbols-outlined text-base">arrow_back</span>
