@@ -27,11 +27,7 @@ COURSE_NAMESPACES: dict[str, str] = {
     "accounting": "15.501_Transcripts",
     "python": "6.0001_Transcripts",
     "financing": "11.437_Transcripts",
-}
-
-# Seeded IDs from backend/supabase/seed_students.sql
-DEMO_PERSONA_TO_STUDENT_ID: dict[str, str] = {
-    "charles": "c0000003-0000-4000-8000-000000000003",
+    "BIS512": "BIS512",
 }
 
 SYSTEM_PROMPT = """
@@ -110,12 +106,19 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
     if not isinstance(goals, dict):
         goals = {"raw": str(goals)}
 
-    course = str(goals.get("course") or goals.get("target_course") or course_fallback or "accounting").lower()
-    if "python" in course:
-        course = "python"
-    elif "financ" in course and "account" not in course:
-        course = "financing"
-    else:
+    # Resolve course from student_courses table; fall back to course_override if provided.
+    course = course_fallback or ""
+    student_id = str(profile.get("id") or "")
+    if not course and student_id:
+        try:
+            supabase = get_supabase_client()
+            sc_resp = supabase.table("student_courses").select("course_id").eq("student_id", student_id).limit(1).execute()
+            sc_rows = sc_resp.data or []
+            if sc_rows:
+                course = str(sc_rows[0]["course_id"])
+        except Exception:
+            pass
+    if not course:
         course = "accounting"
 
     learning_style = (
@@ -149,12 +152,16 @@ def _resolve_student_id(persona_id: str) -> str:
     # Accept explicit UUID directly.
     if re.fullmatch(r"[0-9a-fA-F-]{36}", p):
         return p.lower()
-    sid = DEMO_PERSONA_TO_STUDENT_ID.get(p.lower())
-    if not sid:
-        raise ValueError(
-            f"Unknown persona '{persona_id}'. For now, supported alias is 'charles' or pass a student UUID."
-        )
-    return sid
+    # Look up by name in Supabase students table.
+    try:
+        supabase = get_supabase_client()
+        resp = supabase.table("students").select("id").ilike("name", p).limit(1).execute()
+        rows = resp.data or []
+        if rows:
+            return str(rows[0]["id"])
+    except Exception as exc:
+        raise ValueError(f"Failed to resolve student '{persona_id}': {exc}") from exc
+    raise ValueError(f"No student found with name '{persona_id}'. Pass a name matching the students table or a UUID directly.")
 
 
 def _load_persona_from_supabase(persona_id: str, *, course_override: str | None) -> dict[str, Any]:
@@ -353,12 +360,10 @@ def _get_lesson_from_cache(lesson_id: str, course: str) -> dict[str, Any]:
 def _build_srs_context(srs_record: dict[str, Any] | None) -> str:
     if not srs_record:
         return ""
-    attempts = int(srs_record.get("attempts") or srs_record.get("repetitions") or 0)
-    if attempts == 0:
-        return ""
     last_score = float(srs_record.get("last_score") or srs_record.get("score") or 0)
     ease_factor = float(srs_record.get("ease_factor") or 2.5)
     interval_days = int(srs_record.get("interval_days") or 1)
+    attempts = int(srs_record.get("attempts") or srs_record.get("repetitions") or 1)
 
     if ease_factor < 1.8 or last_score < 3:
         assessment = "struggling"
@@ -379,15 +384,29 @@ def _build_srs_context(srs_record: dict[str, Any] | None) -> str:
             "gaps with targeted examples."
         )
 
-    return (
-        f"PRIOR PERFORMANCE ON THIS LESSON:\n"
-        f"- Attempts: {attempts}\n"
-        f"- Last score: {last_score:.0f}/5\n"
-        f"- Ease factor: {ease_factor:.2f} (2.5 = neutral; lower = harder to retain)\n"
-        f"- Days until next scheduled review: {interval_days}\n"
-        f"- Assessment: {assessment}\n"
-        f"→ {directive}"
-    )
+    lines = [
+        f"PRIOR PERFORMANCE ON THIS LESSON:",
+        f"- Attempts: {attempts}",
+        f"- Last score: {last_score:.0f}/5",
+        f"- Ease factor: {ease_factor:.2f} (2.5 = neutral; lower = harder to retain)",
+        f"- Days until next scheduled review: {interval_days}",
+        f"- Assessment: {assessment}",
+        f"→ {directive}",
+    ]
+
+    gaps = srs_record.get("last_gaps") or ""
+    strengths = srs_record.get("last_strengths") or ""
+    if gaps:
+        lines.append(
+            f"WEAK AREAS FROM LAST ATTEMPT (re-explain these with fresh examples; "
+            f"design activities that specifically target them): {gaps}"
+        )
+    if strengths:
+        lines.append(
+            f"STRONG AREAS FROM LAST ATTEMPT (acknowledge briefly; do not dwell): {strengths}"
+        )
+
+    return "\n".join(lines)
 
 
 def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict], srs_context: str = "") -> str:
@@ -459,10 +478,32 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     """
     persona = _load_persona_from_supabase(persona_id, course_override=course_override)
     course = course_override or persona.get("course", "accounting")
-    lesson = _get_lesson_from_cache(lesson_id, course)
+    student_id = persona.get("student_id", "")
+
+    # Prefer the student's Supabase roadmap (built by build_course_lesson_roadmap)
+    # since that is the authoritative source the roadmap page uses.
+    lesson = None
+    if student_id:
+        try:
+            supabase = get_supabase_client()
+            resp = supabase.table("roadmap_cache").select("roadmap").eq("student_id", student_id).limit(1).execute()
+            rows = resp.data or []
+            if rows:
+                roadmap = rows[0].get("roadmap")
+                if isinstance(roadmap, str):
+                    roadmap = json.loads(roadmap)
+                if isinstance(roadmap, dict):
+                    for l in roadmap.get("lessons", []):
+                        if l.get("lesson_id") == lesson_id:
+                            lesson = l
+                            break
+        except Exception as exc:
+            print(f"[lesson_generator] Supabase roadmap lookup failed: {exc}")
+
+    if lesson is None:
+        lesson = _get_lesson_from_cache(lesson_id, course)
 
     srs_record: dict[str, Any] | None = None
-    student_id = persona.get("student_id", "")
     if student_id:
         try:
             from srs import get_srs_record
@@ -528,7 +569,8 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
             "namespaces_tried": [],
         }
 
-    search_query = f"{lesson['title']} {' '.join(c['name'] for c in lesson.get('concepts', [])[:3])}"
+    _sq_parts = f"{lesson['title']} {' '.join(c['name'] for c in lesson.get('concepts', [])[:3])}"
+    search_query = " ".join(_sq_parts.split()[:10])
     video_search_error: str | None = None
     try:
         videos = search_videos(search_query, max_results=3)

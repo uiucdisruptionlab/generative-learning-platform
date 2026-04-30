@@ -424,19 +424,6 @@ def _get_or_build_lesson_roadmap(
     return fresh
 
 
-def _course_from_student(student: dict[str, Any]) -> str:
-    goals = student.get("learning_goals") or {}
-    if not isinstance(goals, dict):
-        goals = {}
-    target = " ".join(
-        str(goals.get(key) or "")
-        for key in ("target_course", "course", "primary_focus")
-    ).lower()
-    if "python" in target or "computer science" in target:
-        return "python"
-    if "financ" in target and "account" not in target:
-        return "financing"
-    return "accounting"
 
 
 def _node_ids_from_cached_roadmap(course: str) -> list[str] | None:
@@ -526,8 +513,8 @@ def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | No
     source_course = course
     if not source_course:
         try:
-            from personas import get_persona
-            source_course = get_persona(persona_id).get("course")
+            from lesson_generator import _load_persona_from_supabase
+            source_course = _load_persona_from_supabase(persona_id, course_override=None).get("course")
         except Exception:
             source_course = None
     if source_course:
@@ -651,24 +638,7 @@ class LessonScoreRequest(BaseModel):
     reference_answer: str | None = None
     rubric: str | None = None
     metadata: Dict[str, Any] | None = None
-
-
-class SessionStartRequest(BaseModel):
-    student_id: str
-    course: Optional[str] = None
-
-
-class LessonBlockRequest(BaseModel):
-    session_id: str
-
-
-class LessonMessageRequest(BaseModel):
-    session_id: str
-    message: Optional[str] = None
-
-
-class LessonCompleteRequest(BaseModel):
-    session_id: str
+    explicit_score: int | None = None
 
 
 def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None) -> dict[str, Any]:
@@ -749,12 +719,12 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
     if not req.response.strip():
         raise HTTPException(status_code=400, detail="response is required")
 
-    from personas import get_persona
+    from lesson_generator import _load_persona_from_supabase
     from srs import PASSING_SCORE, advance_roadmap_progress, upsert_srs_record
     from supabase_local import get_supabase_client
 
     try:
-        persona = get_persona(req.persona)
+        persona = _load_persona_from_supabase(req.persona, course_override=req.course)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -762,12 +732,21 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
     if not student_id:
         raise HTTPException(status_code=400, detail="student_id is required")
 
-    course = req.course or persona.get("course") or "accounting"
+    course = persona.get("course") or "accounting"
     lesson_context = _lesson_context_for_scoring(
         req.lesson_id, req.persona, course)
 
     try:
-        scoring = _score_lesson_response(req, lesson_context)
+        if req.explicit_score is not None:
+            clamped = max(0, min(5, req.explicit_score))
+            scoring = {
+                "score": clamped,
+                "explanation": "Student indicated they did not know the answer.",
+                "strengths": [],
+                "gaps": [req.question] if req.question else ["this question"],
+            }
+        else:
+            scoring = _score_lesson_response(req, lesson_context)
         supabase = get_supabase_client()
         srs_record = upsert_srs_record(
             student_id=student_id,
@@ -795,6 +774,21 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
                 lesson_id=req.lesson_id,
                 client=supabase,
             )
+            # Advance roadmap_position so the roadmap page shows the next lesson as active.
+            try:
+                from srs import set_roadmap_position
+                cached = _load_lesson_roadmap_cache(student_id)
+                if cached:
+                    flat_idx = 0
+                    for _lesson in (cached.get("lessons") or []):
+                        concepts = _lesson.get("concepts") or []
+                        next_idx = flat_idx + len(concepts)
+                        if _lesson.get("lesson_id") == req.lesson_id:
+                            set_roadmap_position(student_id, next_idx, course_id=course, client=supabase)
+                            break
+                        flat_idx = next_idx
+            except Exception as _exc:
+                print(f"[lesson/score] roadmap_position advance failed: {_exc}")
 
         return {
             "student_id": student_id,
@@ -821,13 +815,13 @@ def get_due_reviews(
     student_id: str = Query(default=""),
     persona: str = Query(default="charles"),
 ) -> dict[str, Any]:
-    from personas import get_persona
+    from lesson_generator import _resolve_student_id
     from srs import get_due_srs_records
     from supabase_local import get_supabase_client
 
     if not student_id:
         try:
-            student_id = get_persona(persona).get("student_id", "")
+            student_id = _resolve_student_id(persona)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
     if not student_id:
@@ -1163,84 +1157,6 @@ def get_student(student_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/session/start")
-def adaptive_session_start(req: SessionStartRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import start_session
-
-        return start_session(req.student_id, req.course)
-    except ValueError as exc:
-        msg = str(exc)
-        if "No course enrollment" in msg:
-            raise HTTPException(status_code=404, detail=msg)
-        raise HTTPException(status_code=400, detail=msg)
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/session/{session_id}")
-def adaptive_session_get(session_id: str) -> dict[str, Any]:
-    try:
-        from adaptive_session import get_session_public
-
-        return get_session_public(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/lesson/block")
-def adaptive_lesson_block(req: LessonBlockRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import generate_block
-
-        return generate_block(req.session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/lesson/message")
-def adaptive_lesson_message(req: LessonMessageRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import lesson_message
-
-        return lesson_message(req.session_id, req.message)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/lesson/complete")
-def adaptive_lesson_complete(req: LessonCompleteRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import complete_lesson
-
-        return complete_lesson(req.session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 @app.post("/lesson/chat")
 async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
     cached = _load_lesson_cache(req.persona, req.lesson_id)
@@ -1252,9 +1168,9 @@ async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
             "concepts", []) if isinstance(c, dict))
         lesson_context = f"Lesson: {title}\nOverview: {overview}\nConcepts covered: {concepts}"
 
-    from personas import get_persona
+    from lesson_generator import _load_persona_from_supabase
     try:
-        persona = get_persona(req.persona)
+        persona = _load_persona_from_supabase(req.persona, course_override=None)
         persona_context = (
             f"Student name: {persona['name']}\n"
             f"Major: {persona['major']}\n"

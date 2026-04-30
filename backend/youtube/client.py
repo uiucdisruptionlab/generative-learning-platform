@@ -34,7 +34,8 @@ def search_videos(query: str, max_results: int = 3) -> list[dict[str, Any]]:
         "maxResults": max_results,
         "key": api_key,
         "relevanceLanguage": "en",
-        "safeSearch": "strict",
+        "safeSearch": "moderate",
+        "videoEmbeddable": "true",
     }
 
     try:

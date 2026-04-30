@@ -1,7 +1,8 @@
 """
 Interactive lesson walkthrough: reuses Pinecone + YouTube (via lesson_generator.load_lesson_sources),
 generates content step-by-step with Bedrock, and returns structured UI blocks (MCQ, flashcards, etc.).
-No SRS — progression is conversational checkpoints only.
+SRS context (ease_factor, last_score) is injected into every LLM prompt so the tutor adapts difficulty
+and emphasis to the student's prior performance. Progression is via conversational checkpoints.
 """
 
 from __future__ import annotations
@@ -471,15 +472,12 @@ def _contextual_source_chunks(
 def _video_search_context(session: dict[str, Any], reflection: str) -> str:
     lesson = session["sources"]["lesson"]
     lb = session.get("last_step_block") or {}
-    tail = " ".join(p.get("excerpt", "") for p in (session.get("step_summaries") or [])[-2:])
-    parts = [
-        str(lesson.get("title") or ""),
-        str(lb.get("title") or ""),
-        str(lb.get("content") or "")[:700],
-        reflection,
-        tail,
-    ]
-    return " ".join(p for p in parts if p).strip()
+    concepts = lesson.get("concepts") or []
+    concept_names = " ".join(c.get("name", "") for c in concepts[:3] if isinstance(c, dict))
+    block_title = str(lb.get("title") or "").strip()
+    lesson_title = str(lesson.get("title") or "").strip()
+    topic = block_title or lesson_title
+    return f"{topic} {concept_names}".strip()
 
 
 def _public_chunks_status(sources: dict[str, Any]) -> dict[str, Any]:
@@ -547,6 +545,49 @@ def _current_step_index(stage: str) -> int | None:
     return int(m.group(1))
 
 
+def _run_prior_performance_llm(session: dict[str, Any]) -> str:
+    lesson = session["sources"]["lesson"]
+    persona = session["sources"]["persona"]
+    srs_record = session["sources"].get("srs_record") or {}
+    attempts = int(srs_record.get("attempts") or 0)
+    last_score = float(srs_record.get("last_score") or srs_record.get("score") or 0)
+    gaps = str(srs_record.get("last_gaps") or "").strip()
+    strengths = str(srs_record.get("last_strengths") or "").strip()
+
+    # attempts = number of completed sessions so far; this session is attempts+1
+    upcoming = attempts + 1
+    ordinal = {2: "second", 3: "third", 4: "fourth"}.get(upcoming) or f"{upcoming}th"
+    system = """You are a supportive AI tutor opening a repeat lesson session. Return JSON only: {"assistant_message": "string"}
+
+Write a brief (3-5 sentences), warm but honest message that:
+1. Acknowledges this is a repeat attempt (mention which attempt if > 1st).
+2. Is direct about what was challenging last time — use GAPS if provided, otherwise reference the score honestly.
+3. Briefly notes what went well (use STRENGTHS if provided).
+4. Sets a focused tone: "today we'll specifically work on [weak areas]" — be concrete.
+Do NOT re-teach content yet. Keep it conversational, not clinical. No bullet points."""
+    user = f"""LESSON: {lesson.get("title")}
+LEARNER: {_persona_block(persona)}
+ATTEMPT NUMBER: {ordinal} attempt
+LAST SCORE: {last_score:.0f}/5
+GAPS FROM LAST ATTEMPT: {gaps or "not recorded"}
+STRENGTHS FROM LAST ATTEMPT: {strengths or "not recorded"}
+
+Return JSON only."""
+    try:
+        raw = _call_converse(system, user, temperature=0.4, max_tokens=400)
+        data = _parse_json_object(raw)
+        out = str(data.get("assistant_message") or "").strip()
+        if out:
+            return out
+    except Exception:
+        pass
+    gap_note = f" Last time, we noticed some gaps around: {gaps}." if gaps else ""
+    return (
+        f"Welcome back — this is your {ordinal} attempt at this lesson.{gap_note} "
+        "Today's session has been adapted to focus on those areas. Let's work through it together."
+    )
+
+
 def _run_overview_llm(session: dict[str, Any]) -> str:
     lesson = session["sources"]["lesson"]
     persona = session["sources"]["persona"]
@@ -561,12 +602,14 @@ Schema:
 
 Write a warm 2–4 sentence overview of the lesson: why it matters and what you will explore together.
 Use ideas supported by the source excerpts when present; otherwise use the listed concepts. Do not invent policies.
-Personalize examples and framing to the learner's interests/goals in LEARNER when relevant."""
+Personalize examples and framing to the learner's interests/goals in LEARNER when relevant.
+When PRIOR PERFORMANCE is present, follow its assessment directive exactly — adjust difficulty, emphasize weak areas, and do not re-explain strong areas at length."""
+    srs_context = session["sources"].get("srs_context", "")
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
 
 LEARNER: {_persona_block(persona)}
-
+{f"PRIOR PERFORMANCE: {srs_context}" if srs_context else ""}
 SOURCE EXCERPTS (ranked for lesson intro from Pinecone — not the full course dump):
 {_bundle_sources(chunks)}
 
@@ -598,12 +641,14 @@ Schema:
 
 This segment is the "{step_type}" portion: {hint}
 Stay faithful to the excerpts when present; otherwise ground content in CONCEPTS. Do not invent facts.
-Explicitly tailor examples to LEARNER interests/goals whenever possible."""
+Explicitly tailor examples to LEARNER interests/goals whenever possible.
+When PRIOR PERFORMANCE is present, follow its assessment directive exactly — adjust difficulty, emphasize weak areas, and do not re-explain strong areas at length."""
+    srs_context = session["sources"].get("srs_context", "")
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
 
 LEARNER: {_persona_block(persona)}
-
+{f"PRIOR PERFORMANCE: {srs_context}" if srs_context else ""}
 ALREADY COVERED (summaries of prior segments):
 {json.dumps(prior, ensure_ascii=False)}
 
@@ -649,9 +694,13 @@ def _resolve_video_widget_payload(
     url_in = str(raw.get("url") or "").strip()
     q = str(raw.get("search_query") or raw.get("query") or "").strip()
     if not q:
+        # context_focus is already a tight "block title + concept names" string
         q = (context_focus or "").strip()
     if not q:
-        q = f"{lesson.get('title', '')} {' '.join(c.get('name', '') for c in (lesson.get('concepts') or [])[:3])}".strip()
+        concepts_short = " ".join(c.get("name", "") for c in (lesson.get("concepts") or [])[:3] if isinstance(c, dict))
+        q = f"{lesson.get('title', '')} {concepts_short}".strip()
+    # Keep the query concise — YouTube ranks best on 5-10 keyword queries
+    q = " ".join(q.split()[:10])
 
     results: list[dict[str, Any]] = []
     try:
@@ -667,7 +716,7 @@ def _resolve_video_widget_payload(
             "url": v.get("url", ""),
             "channel": v.get("channel", ""),
             "thumbnail": v.get("thumbnail", ""),
-            "reason": str(raw.get("caption") or raw.get("reason") or f"Suggested for: {q}")[:400],
+            "reason": str(raw.get("reason") or raw.get("caption") or f"Suggested for: {q}")[:400],
             "source": "youtube_search",
             "search_query_used": q,
         }
@@ -679,7 +728,7 @@ def _resolve_video_widget_payload(
             "url": url_in,
             "channel": str(raw.get("channel") or ""),
             "thumbnail": str(raw.get("thumbnail") or ""),
-            "reason": str(raw.get("reason") or raw.get("caption") or "Video you asked for."),
+            "reason": str(raw.get("reason") or raw.get("caption") or "Video recommendation."),
             "source": "model_url_fallback",
             "search_query_attempted": q,
         }
@@ -731,8 +780,8 @@ interaction.payload rules:
 - type "none": payload {}.
 - type "mcq": payload {"question": "...", "options": ["four strings"], "correct_index": 0-3, "explanation": "..."}.
 - type "flashcards": payload {"concepts": [{"name": "...", "description": "..."}], "cards": optional [{"front": "...", "back": "..."}] } — if cards omitted, UI uses concepts as front/back.
-- type "free_response": payload {"question": "..."}.
-- type "video": payload {"search_query": "string (optional — specific keywords; backend also uses lecture context)", "caption": "string (one line why this helps)", "url": "optional full https://www.youtube.com/watch?v=... if you know a specific video" }.
+- type "free_response": payload {"question": "...", "reference_answer": "... (2-3 sentence model answer the student can compare against)"}.
+- type "video": payload {"search_query": "string (optional — specific keywords; backend also uses lecture context)", "reason": "string (one line why this helps)", "url": "optional full https://www.youtube.com/watch?v=... if you know a specific video" }.
 
 IMPORTANT: If the learner asks to watch a video, see a clip, or wants something explained on YouTube, use type "video".
 Ground your search_query in what you just taught and what they asked — do not use generic course titles alone.
@@ -744,7 +793,12 @@ Grounding rule:
 
 SOURCE EXCERPTS below are retrieved for THIS moment (last segment + their message). Use them to stay on-topic.
 
-Pick mcq or flashcards when a quick check helps; use video when they want audiovisual material; use free_response for open reflection; use none if the learner already showed strong understanding.
+Activity selection — DEFAULT TO GENERATING AN ACTIVITY at every checkpoint:
+- mcq: use for quick factual checks; prefer this as the default when unsure.
+- flashcards: use when there are multiple distinct terms or relationships to reinforce.
+- free_response: use when an open-ended explanation would deepen understanding.
+- video: use only when the learner explicitly asks to watch a clip or wants audiovisual explanation.
+- none: ONLY if the learner's reflection is already a detailed, multi-sentence explanation covering ALL the key points from the segment — a brief acknowledgement or single sentence is NOT enough to skip the activity. If in doubt, default to mcq.
 Keep assistant wording and examples aligned with LEARNER interests/goals; avoid generic examples when profile gives specifics."""
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
@@ -776,23 +830,96 @@ Return JSON only."""
     if itype not in ("none", "mcq", "flashcards", "free_response", "video"):
         itype = "none"
     payload = inter.get("payload") if isinstance(inter.get("payload"), dict) else {}
+
+    # Fallback: if the LLM chose none but the reflection is brief, force a free_response check.
+    if itype == "none" and len(reflection.split()) < 40:
+        last_block = session.get("last_step_block") or {}
+        concepts = lesson.get("concepts") or []
+        concept_names = ", ".join(c.get("name", "") for c in concepts[:3] if isinstance(c, dict))
+        fallback_q = (
+            f"In your own words, what is the most important idea from "
+            f'"{last_block.get("title") or lesson.get("title")}"'
+            + (f" as it relates to {concept_names}?" if concept_names else "?")
+        )
+        itype = "free_response"
+        payload = {"question": fallback_q}
+
     if itype == "video":
         vctx = _video_search_context(session, reflection)
         payload = _resolve_video_widget_payload(payload, lesson, context_focus=vctx)
     return {"assistant_message": msg, "interaction": {"type": itype, "payload": payload}}
 
 
+def _session_performance_summary(session: dict[str, Any]) -> dict[str, Any]:
+    """
+    Summarise all widget results into a simple performance verdict.
+    Returns a dict passed verbatim into the closing LLM prompt.
+    """
+    history: list[dict[str, Any]] = session.get("activity_history") or []
+    if not history:
+        return {"verdict": "no_activities", "detail": "No interactive activities were completed."}
+
+    total = len(history)
+    correct = 0
+    incorrect = 0
+    skipped = 0
+
+    for act in history:
+        result = act.get("result") or {}
+        atype = str(act.get("type") or "")
+        if result.get("skipped"):
+            skipped += 1
+        elif atype == "mcq":
+            if result.get("correct") is True or result.get("selected_index") == (act.get("payload") or {}).get("correct_index"):
+                correct += 1
+            else:
+                incorrect += 1
+        else:
+            # free_response, flashcards, video — counts as engaged if not skipped
+            correct += 1
+
+    engaged = total - skipped
+    if engaged == 0:
+        verdict = "repeat_recommended"
+    elif correct / max(engaged, 1) >= 0.75:
+        verdict = "strong"
+    elif correct / max(engaged, 1) >= 0.4:
+        verdict = "mixed"
+    else:
+        verdict = "repeat_recommended"
+
+    return {
+        "verdict": verdict,
+        "total_activities": total,
+        "correct_or_engaged": correct,
+        "incorrect": incorrect,
+        "skipped": skipped,
+    }
+
+
 def _run_closing_llm(session: dict[str, Any]) -> str:
     lesson = session["sources"]["lesson"]
     persona = session["sources"]["persona"]
     summaries = session.get("step_summaries", [])
+    perf = _session_performance_summary(session)
     closing_chunks = _contextual_source_chunks(session, kind="closing")
     dialogue = _recent_transcript_for_context(session, max_chars=2200)
     system = """You are an expert tutor. Return JSON only: {"assistant_message": "string"}
-Congratulate the learner, recap 3 bullets max, suggest one concrete next action (e.g. try a problem, rewatch a clip)."""
+
+Structure your closing message in three parts:
+1. Congratulate the learner and recap 2-3 key points from the lesson (bullets are fine).
+2. A direct, warm assessment of their session performance based on SESSION_PERFORMANCE verdict. Do NOT state a numeric score, but be clear and honest:
+   - "strong": tell them their understanding was solid and they're ready to move on.
+   - "mixed": name the specific area(s) that still need work and tell them directly it's worth revisiting before moving forward.
+   - "repeat_recommended": be explicit — tell them the session showed some gaps that need attention, and that they should repeat this lesson. Do not soften this to the point of obscuring the message. Still be warm, but be clear.
+   - "no_activities": note they moved through without engaging the checks, and encourage them to try the activities on the next pass.
+3. One concrete next action."""
     user = f"""LESSON: {lesson.get("title")}
 LEARNER: {_persona_block(persona)}
 SEGMENT SUMMARIES: {json.dumps(summaries, ensure_ascii=False)}
+
+SESSION_PERFORMANCE:
+{json.dumps(perf, ensure_ascii=False)}
 
 RECENT CONVERSATION:
 {dialogue if dialogue.strip() else "[n/a]"}
@@ -961,8 +1088,8 @@ def _run_forced_activity_llm(
     payload_schema = {
         "mcq": '{"question":"string","options":["4 strings"],"correct_index":0,"explanation":"string"}',
         "flashcards": '{"concepts":[{"name":"string","description":"string"}],"cards":[{"front":"string","back":"string"}]}',
-        "free_response": '{"question":"string"}',
-        "video": '{"search_query":"string","caption":"string","url":"optional YouTube URL"}',
+        "free_response": '{"question":"string","reference_answer":"string (2-3 sentence model answer)"}',
+        "video": '{"search_query":"string","reason":"string (one line why this helps)","url":"optional YouTube URL"}',
     }[activity_type]
 
     system = f"""You are an expert tutor. Return valid JSON only.
@@ -1050,9 +1177,15 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
         "step_summaries": [],
         "last_step_block": None,
         "last_activity": None,
+        "activity_history": [],
         "pending_widget": None,
         "created_at": time.time(),
     }
+    srs_record = sources.get("srs_record")
+    if srs_record:  # any existing record means at least one prior scored attempt
+        recap = _run_prior_performance_llm(session)
+        _append_assistant(session, recap, meta={"kind": "prior_performance"})
+
     overview = _run_overview_llm(session)
     _append_assistant(session, overview, meta={"kind": "overview"})
     _SESSIONS[session_id] = session
@@ -1172,6 +1305,7 @@ def tick_session(
         _append_assistant(session, bye, meta={"kind": "closing", "early_exit": True})
         session["pending_widget"] = None
         session["cursor"] = _stage_index("complete")
+        _maybe_save_session(session)
         return _response(session)
 
     # Optional widget was skipped by the model — don't block the learner on an empty slot.
@@ -1196,6 +1330,7 @@ def tick_session(
                 _append_assistant(session, bye, meta={"kind": "closing", "early_exit": True})
                 session["pending_widget"] = None
                 session["cursor"] = _stage_index("complete")
+                _maybe_save_session(session)
                 handled_confirm = True
 
             requested = llm_activity or _requested_activity_type(text_msg)
@@ -1292,16 +1427,98 @@ def tick_session(
             ]
             _append_user(session, f"[Completed activity: {summary}]")
             if isinstance(pending_before, dict):
-                session["last_activity"] = {
+                activity_entry = {
                     "type": pending_before.get("type"),
                     "payload": pending_before.get("payload"),
                     "result": widget_result or {"skipped": action == "confirm_yes"},
                 }
+                session["last_activity"] = activity_entry
+                session.setdefault("activity_history", []).append(activity_entry)
             session["pending_widget"] = None
             session["cursor"] += 1
 
     _auto_run_llm_stages(session)
+    _maybe_save_session(session)
     return _response(session)
+
+
+def _maybe_save_session(session: dict[str, Any]) -> None:
+    """Persist the session to `lesson_sessions` once when it reaches the complete stage."""
+    if session.get("saved_to_db"):
+        return
+    cursor = session.get("cursor", 0)
+    if cursor < len(STAGES) and STAGES[cursor] != "complete":
+        return
+    session["saved_to_db"] = True
+    try:
+        _save_session_to_db(session)
+    except Exception as exc:
+        print(f"[dynamic_lesson] session persist failed (non-fatal): {exc}")
+
+
+def _save_session_to_db(session: dict[str, Any]) -> None:
+    from datetime import datetime, timezone
+    from supabase_local import get_supabase_client
+
+    sources = session["sources"]
+    persona = sources.get("persona") or {}
+    lesson = sources.get("lesson") or {}
+    student_id = str(persona.get("student_id") or "")
+    course_id = str(session.get("course") or persona.get("course") or "")
+    lesson_id = str(session.get("lesson_id") or "")
+
+    if not student_id or not lesson_id:
+        return
+
+    perf = _session_performance_summary(session)
+    verdict = perf.get("verdict", "no_activities")
+    correct = int(perf.get("correct_or_engaged") or 0)
+    total = int(perf.get("total_activities") or 0)
+    if total > 0:
+        raw_score = round(5 * correct / total)
+    else:
+        raw_score = 0
+    passed = verdict in ("strong", "mixed")
+
+    started_ts = session.get("created_at")
+    started_at = (
+        datetime.fromtimestamp(started_ts, tz=timezone.utc).isoformat()
+        if isinstance(started_ts, (int, float))
+        else None
+    )
+
+    row = {
+        "session_id": session["session_id"],
+        "student_id": student_id,
+        "course_id": course_id,
+        "lesson_id": lesson_id,
+        "concept_id": lesson_id,
+        "concept_name": str(lesson.get("title") or ""),
+        "mode": "interactive",
+        "score": raw_score,
+        "passed": passed,
+        "transcript": session.get("transcript") or [],
+        "metadata": {
+            "activity_summary": perf,
+            "step_summaries": session.get("step_summaries") or [],
+        },
+        "started_at": started_at,
+    }
+
+    client = get_supabase_client()
+    client.table("lesson_sessions").upsert(row, on_conflict="session_id").execute()
+
+    # Increment attempts once per completed session (not per widget score).
+    try:
+        from srs import get_srs_record
+        existing = get_srs_record(student_id, lesson_id, client=client)
+        prev_attempts = int((existing or {}).get("attempts") or 0)
+        client.table("srs_records").upsert(
+            {"student_id": student_id, "concept_id": lesson_id, "attempts": prev_attempts + 1},
+            on_conflict="student_id,concept_id",
+        ).execute()
+    except Exception as exc:
+        print(f"[_save_session_to_db] attempts increment failed: {exc}")
 
 
 def enqueue_widget(session_id: str, widget: dict[str, Any], *, note: str | None = None) -> dict[str, Any]:

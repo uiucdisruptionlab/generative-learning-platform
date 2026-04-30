@@ -90,19 +90,6 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json()
 }
 
-async function postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const detail = await res.text()
-    throw new Error(detail || `Request failed: ${res.status}`)
-  }
-  return res.json()
-}
-
 export async function fetchHomeData(studentId: string): Promise<{
   student: StudentProfile
   roadmapPosition: RoadmapPosition
@@ -145,8 +132,4 @@ export async function fetchCoursesData(studentId: string): Promise<{
 
 export async function fetchStudent(studentId: string): Promise<StudentProfile> {
   return getJson<StudentProfile>(`/student/${studentId}`)
-}
-
-export async function startSession(studentId: string): Promise<{ session_id: string; node_id?: string }> {
-  return postJson<{ session_id: string; node_id?: string }>('/session/start', { student_id: studentId })
 }
