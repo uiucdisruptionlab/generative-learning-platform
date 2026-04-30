@@ -67,9 +67,9 @@ function formatConfig(format: string): Omit<RecommendationCard, 'title'> {
     return {
       icon: 'style',
       badge: 'Flashcards',
-      badgeColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary',
-      iconColor: 'bg-emerald-50 dark:bg-emerald-900/30 text-primary group-hover:bg-primary',
-      borderColor: 'border-emerald-200/70 dark:border-emerald-700/40 hover:border-primary/60',
+      badgeColor: 'bg-storm-300/60 dark:bg-storm-700/25 text-primary',
+      iconColor: 'bg-storm-300/60 dark:bg-storm-700/25 text-primary group-hover:bg-primary',
+      borderColor: 'border-industrial/45 dark:border-industrial/35 hover:border-primary/60',
       meta: 'Review cards',
     }
   }
@@ -301,7 +301,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-8 border-2 border-emerald-200/80 dark:border-emerald-800/40 shadow-soft">
+        <section className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-8 border-2 border-industrial/45 dark:border-industrial/35 shadow-soft">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-5">
             <div className="min-w-0">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white font-display flex items-center gap-2">
@@ -406,7 +406,7 @@ export default function HomePage() {
                 const border = index === 0
                   ? 'border-red-400 border-red-100 dark:border-red-900/40'
                   : index === 1
-                    ? 'border-primary border-emerald-100 dark:border-emerald-900/40'
+                    ? 'border-primary border-storm-300/70 dark:border-storm-700/35'
                     : 'border-slate-300 border-slate-200 dark:border-slate-700'
                 const labelColor = index === 0 ? 'text-red-500' : index === 1 ? 'text-primary' : 'text-slate-400'
                 return (
