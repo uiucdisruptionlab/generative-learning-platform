@@ -12,9 +12,7 @@ This document covers everything merged into `lesson-loop-patch` so you can merge
 4. [How the Interactive Lesson Loop Works](#4-how-the-interactive-lesson-loop-works)
 5. [API Endpoints Added / Changed](#5-api-endpoints-added--changed)
 6. [Key Bugs Fixed](#6-key-bugs-fixed)
-7. [Environment Variables](#7-environment-variables)
-8. [Running the Backend](#8-running-the-backend)
-9. [Next Steps — Quality Student Responses](#9-next-steps--quality-student-responses)
+7. [Next Steps — Quality Student Responses](#9-next-steps--quality-student-responses)
 
 ---
 
