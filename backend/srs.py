@@ -160,47 +160,53 @@ def upsert_srs_record(
     metadata: dict[str, Any] | None,
     client: Client,
 ) -> dict[str, Any]:
-    _ = (course, metadata)
     concept_id = concept_id or node_id
     if not concept_id:
         raise ValueError("concept_id is required")
 
     previous = get_srs_record(student_id, concept_id, client=client)
     schedule = run_sm2(score, previous)
-    previous_attempts = int((previous or {}).get("attempts") or (previous or {}).get("repetitions") or 0)
     reviewed_at = schedule["last_reviewed_at"]
 
-    row = {
+    # Merge last_gaps / last_strengths from incoming metadata with any prior record so
+    # _build_srs_context can tailor the next session to specific weak areas.
+    meta = metadata or {}
+    gaps = meta.get("gaps") or []
+    strengths = meta.get("strengths") or []
+
+    row: dict[str, Any] = {
         "student_id": student_id,
         "concept_id": concept_id,
         "node_id": concept_id,
         "score": schedule["quality"],
-        "last_score": schedule["quality"],
         "ease_factor": schedule["ease_factor"],
         "interval_days": schedule["interval_days"],
         "repetitions": schedule["repetitions"],
-        "attempts": previous_attempts + 1,
-        "last_reviewed_at": reviewed_at,
         "next_review_at": schedule["next_review_at"],
     }
-    row = {key: value for key, value in row.items() if value is not None}
+    # Columns added via migration — included in primary attempt, dropped in fallback if schema is older.
+    extended: dict[str, Any] = {
+        "last_reviewed_at": reviewed_at,
+        "course": course or "",
+    }
+    if gaps:
+        extended["last_gaps"] = gaps if isinstance(gaps, str) else "; ".join(str(g) for g in gaps)
+    if strengths:
+        extended["last_strengths"] = strengths if isinstance(strengths, str) else "; ".join(str(s) for s in strengths)
+
+    full_row = {k: v for k, v in {**row, **extended}.items() if v is not None and v != ""}
 
     try:
         response = (
             client.table("srs_records")
-            .upsert(row, on_conflict="student_id,concept_id")
+            .upsert(full_row, on_conflict="student_id,concept_id")
             .execute()
         )
     except Exception:  # pylint: disable=broad-exception-caught
-        # Older local Supabase schemas may not have the architecture columns yet.
-        legacy_row = {
-            key: value
-            for key, value in row.items()
-            if key not in {"last_score", "attempts", "last_reviewed_at"}
-        }
+        # Retry with only the base columns that exist in all schema versions.
         response = (
             client.table("srs_records")
-            .upsert(legacy_row, on_conflict="student_id,concept_id")
+            .upsert({k: v for k, v in row.items() if v is not None}, on_conflict="student_id,concept_id")
             .execute()
         )
     data = response.data or []

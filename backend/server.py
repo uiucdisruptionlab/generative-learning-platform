@@ -317,36 +317,6 @@ def _process_llm_response(
 # Routes
 # ---------------------------------------------------------------------------
 
-ROADMAP_CACHE_DIR = Path(__file__).parent
-
-COURSE_KEY_MAP: dict[str, str] = {
-    "ALecFinal": "accounting",
-    "accounting": "accounting",
-    "python": "python",
-    "financing": "financing",
-}
-
-
-def _course_cache_path(course: str) -> Path:
-    key = COURSE_KEY_MAP.get(course, course)
-    return ROADMAP_CACHE_DIR / f"roadmap_cache_{key}.json"
-
-
-def _load_roadmap_cache(course: str) -> dict | None:
-    path = _course_cache_path(course)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return None
-
-
-def _save_roadmap_cache(course: str, data: dict) -> None:
-    _course_cache_path(course).write_text(json.dumps(
-        data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
 # ---------------------------------------------------------------------------
 # Lesson roadmap cache (lecture-grouped + LLM-refined). Stored in the existing
 # Supabase `roadmap_cache` table, keyed by student_id (one course per student
@@ -558,78 +528,6 @@ def _get_or_build_lesson_roadmap(
     if fresh.get("lessons"):
         _save_lesson_roadmap_cache(student_id, fresh)
     return _normalize_lesson_sequence(fresh, course_id)
-
-
-def _course_from_student(student: dict[str, Any]) -> str:
-    goals = student.get("learning_goals") or {}
-    if not isinstance(goals, dict):
-        goals = {}
-    target = " ".join(
-        str(goals.get(key) or "")
-        for key in ("target_course", "course", "primary_focus")
-    ).lower()
-    if "python" in target or "computer science" in target:
-        return "python"
-    if "financ" in target and "account" not in target:
-        return "financing"
-    return "accounting"
-
-
-def _node_ids_from_cached_roadmap(course: str) -> list[str] | None:
-    cached = _load_roadmap_cache(course)
-    if not cached:
-        return None
-    lessons = cached.get("lessons") or []
-    if not isinstance(lessons, list):
-        return None
-    node_ids = [
-        str(lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
-        for lesson in lessons
-        if isinstance(lesson, dict) and (lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
-    ]
-    return node_ids or None
-
-
-def _build_and_cache(course: str, lecture_id: str | None) -> dict:
-    from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
-    if lecture_id:
-        data = build_roadmap_for_lecture(
-            lecture_id, course=course, refine_with_llm=True)
-    else:
-        data = build_roadmap(course=course, refine_with_llm=True)
-    _save_roadmap_cache(course, data)
-    return data
-
-
-@app.get("/roadmap")
-def get_roadmap(
-    course: str = Query(default="accounting"),
-    lecture_id: str | None = Query(default=None),
-):
-    cached = _load_roadmap_cache(course)
-    if cached:
-        return cached
-    try:
-        return _build_and_cache(course, lecture_id)
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/roadmap/rebuild")
-def rebuild_roadmap(
-    course: str = Query(default="accounting"),
-    lecture_id: str | None = Query(default=None),
-):
-    try:
-        return _build_and_cache(course, lecture_id)
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 LESSON_CACHE_DIR = Path(__file__).parent / "lesson_cache"
 
 
@@ -659,37 +557,34 @@ def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | No
     from lesson_generator import generate_lesson
     data = generate_lesson(lesson_id=lesson_id,
                            persona_id=persona_id, course_override=course)
-    source_course = course
-    if not source_course:
-        try:
-            from personas import get_persona
-            source_course = get_persona(persona_id).get("course")
-        except Exception:
-            source_course = None
-    if source_course:
-        roadmap = _load_roadmap_cache(source_course) or {}
-        for lesson in roadmap.get("lessons", []):
-            if lesson.get("lesson_id") == lesson_id:
-                data.setdefault("concepts", lesson.get("concepts", []))
-                data.setdefault("chunk_ids", lesson.get("chunk_ids", []))
-                data.setdefault("lecture_ids", lesson.get("lecture_ids", []))
-                data.setdefault("prerequisites",
-                                lesson.get("prerequisites", []))
-                break
     _save_lesson_cache(persona_id, lesson_id, data, course)
     return data
+
+
+def _student_has_srs_history(persona_id: str, lesson_id: str) -> bool:
+    try:
+        from lesson_generator import resolve_student_id
+        from srs import get_srs_record
+        from supabase_local import get_supabase_client
+        student_id = resolve_student_id(persona_id)
+        return get_srs_record(student_id, lesson_id, client=get_supabase_client()) is not None
+    except Exception as exc:
+        print(f"[get_lesson] SRS history check failed: {exc}")
+        return False
 
 
 @app.get("/lesson/{lesson_id}")
 def get_lesson(lesson_id: str, persona: str = Query(default="charles"), course: str | None = Query(default=None)):
     cached = _load_lesson_cache(persona, lesson_id, course)
-    if cached:
+    if cached and not _student_has_srs_history(persona, lesson_id):
         return cached
     try:
         return _generate_and_cache_lesson(lesson_id, persona, course)
     except Exception as exc:
         import traceback
         traceback.print_exc()
+        if cached:
+            return cached
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -773,24 +668,7 @@ class LessonScoreRequest(BaseModel):
     reference_answer: str | None = None
     rubric: str | None = None
     metadata: Dict[str, Any] | None = None
-
-
-class SessionStartRequest(BaseModel):
-    student_id: str
-    course: Optional[str] = None
-
-
-class LessonBlockRequest(BaseModel):
-    session_id: str
-
-
-class LessonMessageRequest(BaseModel):
-    session_id: str
-    message: Optional[str] = None
-
-
-class LessonCompleteRequest(BaseModel):
-    session_id: str
+    explicit_score: int | None = None
 
 
 def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None) -> dict[str, Any]:
@@ -798,13 +676,6 @@ def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None
         persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
     if cached:
         return cached
-
-    if course:
-        roadmap = _load_roadmap_cache(course) or {}
-        for lesson in roadmap.get("lessons", []):
-            if lesson.get("lesson_id") == lesson_id:
-                return lesson
-
     return {"lesson_id": lesson_id}
 
 
@@ -871,12 +742,12 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
     if not req.response.strip():
         raise HTTPException(status_code=400, detail="response is required")
 
-    from personas import get_persona
+    from lesson_generator import _load_persona_from_supabase
     from srs import PASSING_SCORE, advance_roadmap_progress, upsert_srs_record
     from supabase_local import get_supabase_client
 
     try:
-        persona = get_persona(req.persona)
+        persona = _load_persona_from_supabase(req.persona, course_override=req.course)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -884,12 +755,21 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
     if not student_id:
         raise HTTPException(status_code=400, detail="student_id is required")
 
-    course = req.course or persona.get("course") or "accounting"
+    course = persona.get("course") or "accounting"
     lesson_context = _lesson_context_for_scoring(
         req.lesson_id, req.persona, course)
 
     try:
-        scoring = _score_lesson_response(req, lesson_context)
+        if req.explicit_score is not None:
+            clamped = max(0, min(5, req.explicit_score))
+            scoring = {
+                "score": clamped,
+                "explanation": "Student indicated they did not know the answer.",
+                "strengths": [],
+                "gaps": [req.question] if req.question else ["this question"],
+            }
+        else:
+            scoring = _score_lesson_response(req, lesson_context)
         supabase = get_supabase_client()
         srs_record = upsert_srs_record(
             student_id=student_id,
@@ -917,6 +797,21 @@ def score_lesson(req: LessonScoreRequest) -> dict[str, Any]:
                 lesson_id=req.lesson_id,
                 client=supabase,
             )
+            # Advance roadmap_position so the roadmap page shows the next lesson as active.
+            try:
+                from srs import set_roadmap_position
+                cached = _load_lesson_roadmap_cache(student_id)
+                if cached:
+                    flat_idx = 0
+                    for _lesson in (cached.get("lessons") or []):
+                        concepts = _lesson.get("concepts") or []
+                        next_idx = flat_idx + len(concepts)
+                        if _lesson.get("lesson_id") == req.lesson_id:
+                            set_roadmap_position(student_id, next_idx, course_id=course, client=supabase)
+                            break
+                        flat_idx = next_idx
+            except Exception as _exc:
+                print(f"[lesson/score] roadmap_position advance failed: {_exc}")
 
         return {
             "student_id": student_id,
@@ -943,13 +838,13 @@ def get_due_reviews(
     student_id: str = Query(default=""),
     persona: str = Query(default="charles"),
 ) -> dict[str, Any]:
-    from personas import get_persona
+    from lesson_generator import _resolve_student_id
     from srs import get_due_srs_records
     from supabase_local import get_supabase_client
 
     if not student_id:
         try:
-            student_id = get_persona(persona).get("student_id", "")
+            student_id = _resolve_student_id(persona)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
     if not student_id:
@@ -1293,84 +1188,6 @@ def get_student(student_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/session/start")
-def adaptive_session_start(req: SessionStartRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import start_session
-
-        return start_session(req.student_id, req.course)
-    except ValueError as exc:
-        msg = str(exc)
-        if "No course enrollment" in msg:
-            raise HTTPException(status_code=404, detail=msg)
-        raise HTTPException(status_code=400, detail=msg)
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/session/{session_id}")
-def adaptive_session_get(session_id: str) -> dict[str, Any]:
-    try:
-        from adaptive_session import get_session_public
-
-        return get_session_public(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/lesson/block")
-def adaptive_lesson_block(req: LessonBlockRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import generate_block
-
-        return generate_block(req.session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/lesson/message")
-def adaptive_lesson_message(req: LessonMessageRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import lesson_message
-
-        return lesson_message(req.session_id, req.message)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/lesson/complete")
-def adaptive_lesson_complete(req: LessonCompleteRequest) -> dict[str, Any]:
-    try:
-        from adaptive_session import complete_lesson
-
-        return complete_lesson(req.session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
-    except Exception as exc:
-        import traceback
-
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 @app.post("/lesson/chat")
 async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
     cached = _load_lesson_cache(req.persona, req.lesson_id)
@@ -1382,9 +1199,9 @@ async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
             "concepts", []) if isinstance(c, dict))
         lesson_context = f"Lesson: {title}\nOverview: {overview}\nConcepts covered: {concepts}"
 
-    from personas import get_persona
+    from lesson_generator import _load_persona_from_supabase
     try:
-        persona = get_persona(req.persona)
+        persona = _load_persona_from_supabase(req.persona, course_override=None)
         persona_context = (
             f"Student name: {persona['name']}\n"
             f"Major: {persona['major']}\n"

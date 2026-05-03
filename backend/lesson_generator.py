@@ -27,11 +27,7 @@ COURSE_NAMESPACES: dict[str, str] = {
     "accounting": "15.501_Transcripts",
     "python": "6.0001_Transcripts",
     "financing": "11.437_Transcripts",
-}
-
-# Seeded IDs from backend/supabase/seed_students.sql
-DEMO_PERSONA_TO_STUDENT_ID: dict[str, str] = {
-    "charles": "c0000003-0000-4000-8000-000000000003",
+    "BIS512": "BIS512",
 }
 
 SYSTEM_PROMPT = """
@@ -78,6 +74,7 @@ Output schema:
 
 Rules:
 - Tailor the depth, tone, and structure of every step to the learner profile provided.
+- If PRIOR PERFORMANCE data is present, follow its directive exactly — adjust difficulty, depth, and remediation accordingly.
 - Personalize examples and analogies to the learner's interests and goals/career direction whenever relevant.
 - Steps should flow logically: start with core concepts, then move to examples, then a summary.
 - Aim for exactly 3 steps.
@@ -109,12 +106,19 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
     if not isinstance(goals, dict):
         goals = {"raw": str(goals)}
 
-    course = str(goals.get("course") or goals.get("target_course") or course_fallback or "accounting").lower()
-    if "python" in course:
-        course = "python"
-    elif "financ" in course and "account" not in course:
-        course = "financing"
-    else:
+    # Resolve course from student_courses table; fall back to course_override if provided.
+    course = course_fallback or ""
+    student_id = str(profile.get("id") or "")
+    if not course and student_id:
+        try:
+            supabase = get_supabase_client()
+            sc_resp = supabase.table("student_courses").select("course_id").eq("student_id", student_id).limit(1).execute()
+            sc_rows = sc_resp.data or []
+            if sc_rows:
+                course = str(sc_rows[0]["course_id"])
+        except Exception:
+            pass
+    if not course:
         course = "accounting"
 
     learning_style = (
@@ -134,7 +138,12 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
         "notes": str(llm_profile.get("notes") or ""),
         "interests": [str(x) for x in interests if str(x).strip()],
         "learning_goals": goals,
+        "preferred_formats": [str(x) for x in preferred_formats if str(x).strip()],
     }
+
+
+def resolve_student_id(persona_id: str) -> str:
+    return _resolve_student_id(persona_id)
 
 
 def _resolve_student_id(persona_id: str) -> str:
@@ -144,12 +153,16 @@ def _resolve_student_id(persona_id: str) -> str:
     # Accept explicit UUID directly.
     if re.fullmatch(r"[0-9a-fA-F-]{36}", p):
         return p.lower()
-    sid = DEMO_PERSONA_TO_STUDENT_ID.get(p.lower())
-    if not sid:
-        raise ValueError(
-            f"Unknown persona '{persona_id}'. For now, supported alias is 'charles' or pass a student UUID."
-        )
-    return sid
+    # Look up by name in Supabase students table.
+    try:
+        supabase = get_supabase_client()
+        resp = supabase.table("students").select("id").ilike("name", p).limit(1).execute()
+        rows = resp.data or []
+        if rows:
+            return str(rows[0]["id"])
+    except Exception as exc:
+        raise ValueError(f"Failed to resolve student '{persona_id}': {exc}") from exc
+    raise ValueError(f"No student found with name '{persona_id}'. Pass a name matching the students table or a UUID directly.")
 
 
 def _load_persona_from_supabase(persona_id: str, *, course_override: str | None) -> dict[str, Any]:
@@ -345,7 +358,59 @@ def _get_lesson_from_cache(lesson_id: str, course: str) -> dict[str, Any]:
     raise ValueError(f"Lesson '{lesson_id}' not found in roadmap cache for course '{course}'.")
 
 
-def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict]) -> str:
+def _build_srs_context(srs_record: dict[str, Any] | None) -> str:
+    if not srs_record:
+        return ""
+    last_score = float(srs_record.get("last_score") or srs_record.get("score") or 0)
+    ease_factor = float(srs_record.get("ease_factor") or 2.5)
+    interval_days = int(srs_record.get("interval_days") or 1)
+    attempts = int(srs_record.get("attempts") or srs_record.get("repetitions") or 1)
+
+    if ease_factor < 1.8 or last_score < 3:
+        assessment = "struggling"
+        directive = (
+            "Remediate — use simpler language, more concrete examples, and rebuild from "
+            "first principles. Do not assume prior understanding carries over."
+        )
+    elif ease_factor >= 2.8 and last_score >= 4:
+        assessment = "strong"
+        directive = (
+            "Student has a strong grasp. Go deeper, introduce nuance, and include a more "
+            "challenging question that tests edge cases."
+        )
+    else:
+        assessment = "progressing"
+        directive = (
+            "Student is making steady progress. Reinforce core concepts and address any "
+            "gaps with targeted examples."
+        )
+
+    lines = [
+        f"PRIOR PERFORMANCE ON THIS LESSON:",
+        f"- Attempts: {attempts}",
+        f"- Last score: {last_score:.0f}/5",
+        f"- Ease factor: {ease_factor:.2f} (2.5 = neutral; lower = harder to retain)",
+        f"- Days until next scheduled review: {interval_days}",
+        f"- Assessment: {assessment}",
+        f"→ {directive}",
+    ]
+
+    gaps = srs_record.get("last_gaps") or ""
+    strengths = srs_record.get("last_strengths") or ""
+    if gaps:
+        lines.append(
+            f"WEAK AREAS FROM LAST ATTEMPT (re-explain these with fresh examples; "
+            f"design activities that specifically target them): {gaps}"
+        )
+    if strengths:
+        lines.append(
+            f"STRONG AREAS FROM LAST ATTEMPT (acknowledge briefly; do not dwell): {strengths}"
+        )
+
+    return "\n".join(lines)
+
+
+def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict], srs_context: str = "") -> str:
     concepts_text = "\n".join(
         f"- {c['name']}: {c.get('description', '')}" for c in lesson.get("concepts", [])
     )
@@ -355,6 +420,8 @@ def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, vide
         else "[No lecture excerpts loaded — use CONCEPTS only. Do not tell the learner to install software.]"
     )
     videos_text = json.dumps(videos, indent=2) if videos else "[]"
+
+    srs_section = f"\n\n{srs_context}" if srs_context else ""
 
     return f"""
 LESSON TO GENERATE:
@@ -372,7 +439,7 @@ Learning style: {persona['learning_style']}
 Hours available per week: {persona['hours_per_week']}
 Interests: {json.dumps(persona.get('interests', []), ensure_ascii=False)}
 Learning goals: {json.dumps(persona.get('learning_goals', {}), ensure_ascii=False)}
-Additional notes: {persona['notes']}
+Additional notes: {persona['notes']}{srs_section}
 
 SOURCE MATERIAL (raw lecture chunks):
 {chunks_text}
@@ -412,7 +479,39 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     """
     persona = _load_persona_from_supabase(persona_id, course_override=course_override)
     course = course_override or persona.get("course", "accounting")
-    lesson = _get_lesson_from_cache(lesson_id, course)
+    student_id = persona.get("student_id", "")
+
+    # Prefer the student's Supabase roadmap (built by build_course_lesson_roadmap)
+    # since that is the authoritative source the roadmap page uses.
+    lesson = None
+    if student_id:
+        try:
+            supabase = get_supabase_client()
+            resp = supabase.table("roadmap_cache").select("roadmap").eq("student_id", student_id).limit(1).execute()
+            rows = resp.data or []
+            if rows:
+                roadmap = rows[0].get("roadmap")
+                if isinstance(roadmap, str):
+                    roadmap = json.loads(roadmap)
+                if isinstance(roadmap, dict):
+                    for l in roadmap.get("lessons", []):
+                        if l.get("lesson_id") == lesson_id:
+                            lesson = l
+                            break
+        except Exception as exc:
+            print(f"[lesson_generator] Supabase roadmap lookup failed: {exc}")
+
+    if lesson is None:
+        lesson = _get_lesson_from_cache(lesson_id, course)
+
+    srs_record: dict[str, Any] | None = None
+    if student_id:
+        try:
+            from srs import get_srs_record
+            srs_record = get_srs_record(student_id, lesson_id, client=get_supabase_client())
+        except Exception as exc:
+            print(f"[lesson_generator] SRS lookup skipped: {exc}")
+    srs_context = _build_srs_context(srs_record)
 
     chunk_ids = lesson.get("chunk_ids", [])
     if chunk_ids:
@@ -471,20 +570,26 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
             "namespaces_tried": [],
         }
 
-    search_query = f"{lesson['title']} {' '.join(c['name'] for c in lesson.get('concepts', [])[:3])}"
+    _sq_parts = f"{lesson['title']} {' '.join(c['name'] for c in lesson.get('concepts', [])[:3])}"
+    search_query = " ".join(_sq_parts.split()[:10])
     video_search_error: str | None = None
-    try:
-        videos = search_videos(search_query, max_results=3)
-    except Exception as e:
-        print(f"[lesson_generator] YouTube search failed: {e}")
-        videos = []
-        video_search_error = str(e)
+    videos = []
+    if "videos" in persona.get("preferred_formats", []):
+        try:
+            videos = search_videos(search_query, max_results=3)
+        except Exception as e:
+            print(f"[lesson_generator] YouTube search failed: {e}")
+            videos = []
+            video_search_error = str(e)
 
-    if not videos and not video_search_error:
-        if not os.getenv("YOUTUBE_API_KEY", "").strip():
-            video_search_error = (
-                "YOUTUBE_API_KEY is not set. Add it to backend/.env and restart the API server."
-            )
+        if not videos and not video_search_error:
+            if not os.getenv("YOUTUBE_API_KEY", "").strip():
+                video_search_error = (
+                    "YOUTUBE_API_KEY is not set. Add it to backend/.env and restart the API server."
+                )
+    else:
+        # Do not treat the absence of a video preference as an error.
+        video_search_error = None
 
     return {
         "lesson": lesson,
@@ -495,6 +600,8 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
         "chunks_meta": chunks_meta,
         "videos": videos,
         "video_search_error": video_search_error,
+        "srs_record": srs_record,
+        "srs_context": srs_context,
     }
 
 
@@ -504,8 +611,9 @@ def generate_lesson(lesson_id: str, persona_id: str, course_override: str | None
     chunks = bundle["chunks"]
     persona = bundle["persona"]
     videos = bundle["videos"]
+    srs_context = bundle.get("srs_context", "")
 
-    prompt = _build_prompt(lesson, chunks, persona, videos)
+    prompt = _build_prompt(lesson, chunks, persona, videos, srs_context)
 
     client = create_bedrock_runtime_client(region=AWS_REGION)
     response = client.converse(

@@ -6,6 +6,7 @@ import {
   startInteractiveLesson,
   continueInteractiveSession,
   tickInteractiveLesson,
+  scoreLesson,
   type InteractiveSessionState,
   type InteractiveTranscriptEntry,
   type PendingWidget,
@@ -80,7 +81,7 @@ function McqWidget({
               onClick={() => setIdx(i)}
               className={`w-full text-left px-4 py-3 rounded-xl border-2 text-sm transition-all ${
                 show && isCorrect
-                  ? 'border-primary bg-emerald-50 dark:bg-emerald-900/20'
+                  ? 'border-primary bg-storm-300/55 dark:bg-storm-700/25'
                   : show && selected && !isCorrect
                   ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
                   : selected
@@ -211,29 +212,56 @@ function FreeResponseWidget({
 }) {
   const [text, setText] = useState('')
   const [sent, setSent] = useState(false)
+  const [dontKnow, setDontKnow] = useState(false)
+
+  const handleDontKnow = () => {
+    setDontKnow(true)
+    setSent(true)
+    onSubmit({ text: '', dont_know: true })
+  }
 
   return (
     <div className="rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 p-5 space-y-3">
       <p className="text-sm font-medium text-slate-900 dark:text-white">{payload.question}</p>
-      <textarea
-        value={text}
-        disabled={disabled || sent}
-        onChange={(e) => setText(e.target.value)}
-        rows={4}
-        className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-3 text-sm focus:border-primary focus:outline-none disabled:opacity-50"
-        placeholder="Type your answer…"
-      />
-      <button
-        type="button"
-        disabled={disabled || sent || !text.trim()}
-        onClick={() => {
-          setSent(true)
-          onSubmit({ text: text.trim() })
-        }}
-        className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-40"
-      >
-        Submit
-      </button>
+      {dontKnow && payload.reference_answer && (
+        <div className="rounded-xl border-2 border-amber-200 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-950/30 p-4 space-y-1">
+          <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">Model answer</p>
+          <p className="text-sm text-slate-800 dark:text-slate-100 leading-relaxed">{payload.reference_answer}</p>
+        </div>
+      )}
+      {!sent && (
+        <>
+          <textarea
+            value={text}
+            disabled={disabled}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-3 text-sm focus:border-primary focus:outline-none disabled:opacity-50"
+            placeholder="Type your answer…"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={disabled || !text.trim()}
+              onClick={() => {
+                setSent(true)
+                onSubmit({ text: text.trim() })
+              }}
+              className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-40"
+            >
+              Submit
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={handleDontKnow}
+              className="px-4 py-2 rounded-xl border-2 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 text-sm font-medium hover:border-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors disabled:opacity-40"
+            >
+              I don&apos;t know
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -338,7 +366,7 @@ function stepBadge(stepType: string): { label: string; icon: string; color: stri
     return {
       label: 'Summary',
       icon: 'summarize',
-      color: 'text-primary bg-emerald-50 dark:bg-emerald-900/20',
+      color: 'text-primary bg-storm-300/55 dark:bg-storm-700/25',
     }
   }
   return {
@@ -361,7 +389,7 @@ function UserTurn({ content }: { content: string }) {
   if (content.startsWith('[Completed activity:')) {
     return (
       <div className="flex justify-center py-1">
-        <span className="text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-primary border border-primary/20">
+        <span className="text-xs font-medium px-3 py-1.5 rounded-full bg-storm-300/55 dark:bg-storm-700/30 text-primary border border-primary/20">
           Activity completed
         </span>
       </div>
@@ -385,11 +413,25 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
     return <UserTurn content={entry.content} />
   }
 
+  if (kind === 'prior_performance') {
+    return (
+      <section className="rounded-2xl border-2 border-amber-300/70 dark:border-amber-700/50 bg-amber-50/60 dark:bg-amber-950/30 p-6 shadow-soft">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="material-symbols-outlined text-amber-600 dark:text-amber-400">history</span>
+          <span className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+            Picking up from last time
+          </span>
+        </div>
+        <p className="text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+      </section>
+    )
+  }
+
   if (kind === 'overview') {
     return (
       <section className="rounded-2xl bg-primary/5 dark:bg-primary/10 border-2 border-primary/20 p-6 shadow-soft">
         <span
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold mb-4 text-primary bg-emerald-50 dark:bg-emerald-900/20`}
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold mb-4 text-primary bg-storm-300/55 dark:bg-storm-700/25`}
         >
           <span className="material-symbols-outlined text-sm">menu_book</span>
           Overview
@@ -440,7 +482,7 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
 
   if (kind === 'closing') {
     return (
-      <section className="rounded-2xl border-2 border-emerald-200/80 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-950/25 p-6 shadow-soft">
+      <section className="rounded-2xl border-2 border-industrial/45 dark:border-industrial/35 bg-storm-300/45 dark:bg-storm-700/20 p-6 shadow-soft">
         <div className="flex items-center gap-2 mb-3">
           <span className="material-symbols-outlined text-primary">celebration</span>
           <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Wrap-up</h3>
@@ -454,6 +496,42 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
     return (
       <p className="text-xs text-slate-500 dark:text-slate-400 italic px-1">{entry.content}</p>
     )
+  }
+
+  if (kind === 'block') {
+    const blockType = typeof meta.block_type === 'string' ? meta.block_type : ''
+    const content = meta.content && typeof meta.content === 'object' ? meta.content as Record<string, unknown> : {}
+    if (blockType === 'video') {
+      const title = String(content.title || content.search_query || 'Video')
+      const url = String(content.url || '')
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50/60 dark:bg-red-950/20 border border-red-200/60 dark:border-red-900/40 text-sm text-slate-700 dark:text-slate-300">
+          <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-base flex-shrink-0">smart_display</span>
+          {url ? (
+            <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline text-primary">{title}</a>
+          ) : (
+            <span>{title}</span>
+          )}
+        </div>
+      )
+    }
+    if (blockType === 'flashcard') {
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/40 text-sm text-slate-700 dark:text-slate-300">
+          <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-base flex-shrink-0">style</span>
+          <span>{String(content.front || 'Flashcard activity')}</span>
+        </div>
+      )
+    }
+    if (blockType === 'mcq') {
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300">
+          <span className="material-symbols-outlined text-slate-500 text-base flex-shrink-0">quiz</span>
+          <span>{String(content.question || 'Quiz question')}</span>
+        </div>
+      )
+    }
+    return null
   }
 
   return (
@@ -506,7 +584,13 @@ function normalizePendingWidget(raw: unknown): PendingWidget | null {
     return { type: 'flashcards', payload: { concepts, cards } }
   }
   if (t === 'free_response') {
-    return { type: 'free_response', payload: { question: String(p.question ?? '') } }
+    return {
+      type: 'free_response',
+      payload: {
+        question: String(p.question ?? ''),
+        reference_answer: p.reference_answer != null ? String(p.reference_answer) : undefined,
+      },
+    }
   }
   if (t === 'video') {
     return {
@@ -573,6 +657,35 @@ export default function InteractiveLessonPage() {
     [state?.session_id],
   )
 
+  const fireScore = useCallback(
+    (response: string, question?: string, referenceAnswer?: string, explicitScore?: number) => {
+      if (!lessonId) return
+      scoreLesson({ lessonId, persona, response, question, referenceAnswer, explicitScore }).catch(() => {
+        // fire-and-forget — don't surface scoring errors in the lesson UX
+      })
+    },
+    [lessonId, persona],
+  )
+
+  const handleRestart = useCallback(async () => {
+    if (!lessonId) return
+    setLoading(true)
+    setError(null)
+    setState(null)
+    // Remove stale session_id from URL so a page refresh also starts fresh
+    const next = new URLSearchParams(window.location.search)
+    next.delete('session_id')
+    window.history.replaceState({}, '', `${window.location.pathname}${next.toString() ? '?' + next : ''}`)
+    try {
+      const s = await startInteractiveLesson(lessonId, persona, courseOverride)
+      setState({ ...s, pending_widget: normalizePendingWidget(s.pending_widget) })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [lessonId, persona, courseOverride])
+
   useEffect(() => {
     if (!lessonId && !sessionOverride) return
     let cancelled = false
@@ -625,7 +738,7 @@ export default function InteractiveLessonPage() {
       action={
         <Link
           to="/roadmap"
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-white hover:border-primary/60 hover:text-primary dark:hover:bg-slate-900 transition-colors shadow-sm"
+          className="inline-flex items-center gap-2 rounded-xl border-2 border-white/70 bg-white/95 dark:bg-slate-900/90 dark:border-slate-600 px-4 py-2 text-sm font-semibold text-illini-blue dark:text-slate-100 hover:bg-white hover:border-primary hover:text-primary dark:hover:bg-slate-900 transition-colors shadow-sm"
           aria-label="Exit lesson and return to roadmap"
         >
           <span className="material-symbols-outlined text-base">arrow_back</span>
@@ -732,13 +845,22 @@ export default function InteractiveLessonPage() {
                 </p>
                 {pending.type === 'mcq' && (
                   <McqWidget
+                    key={pending.payload.question}
                     payload={pending.payload}
                     disabled={busy}
-                    onSubmit={(widget_result) => runTick({ widget_result })}
+                    onSubmit={(widget_result) => {
+                      fireScore(
+                        String(widget_result.selected_option ?? ''),
+                        pending.payload.question,
+                        String(widget_result.correct_option ?? ''),
+                      )
+                      runTick({ widget_result })
+                    }}
                   />
                 )}
                 {pending.type === 'flashcards' && (
                   <FlashcardsWidget
+                    key={pending.payload.cards?.[0]?.front ?? pending.payload.concepts?.[0]?.name}
                     payload={pending.payload}
                     disabled={busy}
                     onSubmit={(widget_result) => runTick({ widget_result })}
@@ -748,7 +870,14 @@ export default function InteractiveLessonPage() {
                   <FreeResponseWidget
                     payload={pending.payload}
                     disabled={busy}
-                    onSubmit={(widget_result) => runTick({ widget_result })}
+                    onSubmit={(widget_result) => {
+                      if (widget_result.dont_know) {
+                        fireScore('', pending.payload.question, undefined, 0)
+                      } else {
+                        fireScore(String(widget_result.text ?? ''), pending.payload.question)
+                      }
+                      runTick({ widget_result })
+                    }}
                   />
                 )}
                 {pending.type === 'video' && (
@@ -826,13 +955,32 @@ export default function InteractiveLessonPage() {
             )}
 
             {state.awaiting === 'none' && (
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                You&apos;re at the end of this walkthrough.{' '}
-                <Link className="text-primary underline" to="/roadmap">
-                  Back to your roadmap
-                </Link>
-                .
-              </p>
+              <section className="rounded-2xl border-2 border-primary/25 bg-primary/5 dark:bg-primary/10 px-6 py-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary text-2xl">task_alt</span>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Lesson complete</h3>
+                </div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Your responses have been scored and saved to your SRS record. Repeat the lesson to practice again — the spaced-repetition algorithm will adjust difficulty based on your last score.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleRestart}
+                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-light transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-base">replay</span>
+                    Repeat this lesson
+                  </button>
+                  <Link
+                    to="/roadmap"
+                    className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-primary/60 hover:text-primary transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-base">arrow_back</span>
+                    Back to roadmap
+                  </Link>
+                </div>
+              </section>
             )}
 
             {import.meta.env.DEV && (

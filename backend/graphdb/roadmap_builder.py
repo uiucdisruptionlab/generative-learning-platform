@@ -25,6 +25,7 @@ COURSE_SOURCE_PREFIXES = {
     "finance": ("FLec",),
     "financing": ("FLec",),
     "python": ("PLec",),
+    "BIS512": ("BIS512",),
     "deep_learning": ("DL_", "DLlec", "DL_lec"),
     "dl": ("DL_", "DLlec", "DL_lec"),
 }
@@ -639,7 +640,7 @@ def _build_lesson_candidates(lectures: list[dict[str, Any]]) -> list[dict[str, A
             if not concepts:
                 continue
             candidates.append({
-                "lesson_id": f"L{i + 1:03d}",
+                "lesson_id": f"lesson_{i + 1:03d}",
                 "title": str(lec.get("lecture_title") or lec.get("lecture_id") or f"Lesson {i + 1}"),
                 "summary": "",
                 "concepts": concepts,
@@ -658,7 +659,7 @@ def _build_lesson_candidates(lectures: list[dict[str, Any]]) -> list[dict[str, A
         return []
     if not chunks:
         return [{
-            "lesson_id": "L001",
+            "lesson_id": "lesson_001",
             "title": str(lec.get("lecture_title") or lecture_id or "Lesson 1"),
             "summary": "",
             "concepts": [
@@ -696,7 +697,7 @@ def _build_lesson_candidates(lectures: list[dict[str, Any]]) -> list[dict[str, A
         if not group_concepts:
             continue
         candidates.append({
-            "lesson_id": f"L{len(candidates) + 1:03d}",
+            "lesson_id": f"lesson_{len(candidates) + 1:03d}",
             "title": f"{lecture_id} part {len(candidates) + 1}",
             "summary": "",
             "concepts": group_concepts,
@@ -746,10 +747,11 @@ def _attach_concept_ids(
                 )
             )
         attached.append({
-            "lesson_id": str(lesson.get("lesson_id") or f"L{i + 1:03d}"),
+            "lesson_id": str(lesson.get("lesson_id") or f"lesson_{i + 1:03d}"),
             "title": str(lesson.get("title") or "").strip() or f"Lesson {i + 1}",
             "summary": str(lesson.get("summary") or "").strip(),
             "lecture_ids": [str(x) for x in (lesson.get("lecture_ids") or [])],
+            "chunk_ids": [str(x) for x in (lesson.get("chunk_ids") or [])],
             "concepts": lesson_concepts,
         })
     return attached
@@ -800,6 +802,14 @@ def build_course_lesson_roadmap(
     candidates = _build_lesson_candidates(lectures)
     refined_lessons: list[dict[str, Any]] = candidates
 
+    # Build a lookup so chunk_ids can be re-attached after LLM refinement
+    # (the LLM only outputs concept groupings, not chunk IDs).
+    lecture_to_chunks: dict[str, list[str]] = {}
+    for c in candidates:
+        for lid in c.get("lecture_ids", []):
+            lecture_to_chunks.setdefault(lid, [])
+            lecture_to_chunks[lid].extend(c.get("chunk_ids", []))
+
     if refine_with_llm and candidates:
         try:
             from graphdb.roadmap_refiner import refine_roadmap_with_llm
@@ -815,7 +825,20 @@ def build_course_lesson_roadmap(
             print(f"[roadmap_builder] LLM refinement failed for {course_id!r}: {exc}; using raw lecture grouping")
             refined_lessons = candidates
 
-    final_lessons = _attach_concept_ids(refined_lessons, name_to_id, name_to_description, concept_order)
+    # Re-attach chunk_ids from original candidates via lecture_ids
+    for lesson in refined_lessons:
+        if not lesson.get("chunk_ids"):
+            chunks: list[str] = []
+            for lid in lesson.get("lecture_ids", []):
+                chunks.extend(lecture_to_chunks.get(lid, []))
+            lesson["chunk_ids"] = sorted(set(chunks))
+
+    final_lessons = _attach_concept_ids(
+        refined_lessons,
+        name_to_id,
+        name_to_description,
+        concept_order,
+    )
     if not final_lessons:
         # Refiner may have produced output that doesn't match any known concept names.
         # Fall back to the raw candidates so the student still gets *something*.

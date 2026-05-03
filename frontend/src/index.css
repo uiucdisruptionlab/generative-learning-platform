@@ -35,7 +35,7 @@ h1, h2, h3, h4 {
 }
 
 .highlight-keyword {
-  @apply font-bold text-forest underline decoration-warm-yellow/50 underline-offset-2 break-words;
+  @apply font-bold text-forest underline decoration-harvest/50 underline-offset-2 break-words;
 }
 
 /* Prevent layout overflow from text - force wrapping */

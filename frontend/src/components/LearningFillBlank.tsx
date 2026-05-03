@@ -108,7 +108,7 @@ export default function LearningFillBlank({
           }}
           className={`inline-flex min-w-[7rem] align-baseline justify-center px-2 py-0.5 mx-0.5 rounded-lg border-2 border-dashed transition-colors ${
             blank
-              ? 'border-primary bg-emerald-50/90 dark:bg-emerald-950/40 text-slate-900 dark:text-white font-semibold cursor-pointer'
+              ? 'border-primary bg-storm-300/65 dark:bg-storm-700/35 text-slate-900 dark:text-white font-semibold cursor-pointer'
               : 'border-amber-400/70 dark:border-amber-600/50 bg-amber-50/40 dark:bg-amber-950/20 text-slate-500 dark:text-slate-400'
           }`}
           aria-label={blank ? `Filled with ${blank}. Click to clear.` : 'Drop zone for answer'}

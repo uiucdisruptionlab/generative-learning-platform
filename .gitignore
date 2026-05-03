@@ -5,10 +5,12 @@ backend/roadmap_cache*.json
 backend/lesson_cache/
 .claude/settings.local.json
 .vscode/settings.json
+# Python
 backend/.venv/
 .venv/
 venv/
-# Python
+env/
+
 **/__pycache__/
 *.py[cod]
 *$py.class

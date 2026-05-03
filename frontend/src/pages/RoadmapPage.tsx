@@ -6,7 +6,6 @@ import type { HomeRoadmapConcept, HomeRoadmapOutcome } from '../data/homeRoadmap
 import { usePersona } from '../contexts/PersonaContext'
 import {
   fetchStudentRoadmapData,
-  startSession,
   type GeneratedRoadmap,
   type GeneratedRoadmapConcept,
   type GeneratedRoadmapLesson,
@@ -85,13 +84,10 @@ export default function RoadmapPage() {
   const title = data?.student.learning_goals?.target_course || data?.student.learning_goals?.primary_focus || 'Roadmap'
   const description = `${outcomes.length} lesson${outcomes.length === 1 ? '' : 's'} · Personalized for you`
 
-  const handleStartHere = async (event: MouseEvent<HTMLAnchorElement>) => {
+  const handleStartHere = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault()
-    try {
-      const session = await startSession(studentId)
-      navigate(`/lesson?session_id=${encodeURIComponent(session.session_id)}`)
-    } catch (err) {
-      setError(String(err))
+    if (activeLesson?.lesson_id) {
+      navigate(`/lesson/${encodeURIComponent(activeLesson.lesson_id)}/interactive`)
     }
   }
 
@@ -118,10 +114,10 @@ export default function RoadmapPage() {
         ) : (
           <LearningRoadmap
             outcomes={outcomes.length ? outcomes : []}
-            startHereTo={activeLesson ? `/lesson?lesson_id=${encodeURIComponent(activeLesson.lesson_id)}` : '#'}
+            startHereTo={activeLesson ? `/lesson/${encodeURIComponent(activeLesson.lesson_id)}/interactive` : '#'}
             onStartHere={handleStartHere}
-            buildTranscriptHref={(concept) =>
-              `/lesson/transcript?student_id=${encodeURIComponent(studentId)}&concept_id=${encodeURIComponent(concept.id)}`
+            buildTranscriptHref={(_concept, outcome) =>
+              `/lesson/transcript?student_id=${encodeURIComponent(studentId)}&concept_id=${encodeURIComponent(outcome.id)}`
             }
           />
         )}
