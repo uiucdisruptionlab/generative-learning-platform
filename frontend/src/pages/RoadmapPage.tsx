@@ -14,6 +14,40 @@ import {
 
 type RoadmapData = Awaited<ReturnType<typeof fetchStudentRoadmapData>>
 
+/** Match other app headers (e.g. “My Courses”) — title case with short words lowercased mid-phrase. */
+function toHeadingTitle(raw: string): string {
+  const s = raw.trim()
+  if (!s) return raw
+  const small = new Set([
+    'a',
+    'an',
+    'the',
+    'and',
+    'or',
+    'but',
+    'nor',
+    'as',
+    'at',
+    'by',
+    'for',
+    'in',
+    'of',
+    'on',
+    'to',
+    'vs',
+    'via',
+  ])
+  return s
+    .split(/\s+/)
+    .map((word, i) => {
+      const lower = word.toLowerCase()
+      if (i > 0 && small.has(lower)) return lower
+      if (word.length <= 1) return word.toUpperCase()
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    })
+    .join(' ')
+}
+
 function stateToStatus(state: RoadmapState | undefined): HomeRoadmapOutcome['status'] {
   if (state === 'completed') return 'completed'
   if (state === 'active') return 'current'
@@ -81,7 +115,9 @@ export default function RoadmapPage() {
     () => (data?.roadmap.lessons ?? []).find((lesson) => lesson.state === 'active'),
     [data?.roadmap.lessons],
   )
-  const title = data?.student.learning_goals?.target_course || data?.student.learning_goals?.primary_focus || 'Roadmap'
+  const titleRaw =
+    data?.student.learning_goals?.target_course || data?.student.learning_goals?.primary_focus || 'Roadmap'
+  const title = toHeadingTitle(titleRaw)
   const description = `${outcomes.length} lesson${outcomes.length === 1 ? '' : 's'} · Personalized for you`
 
   const handleStartHere = (event: MouseEvent<HTMLAnchorElement>) => {

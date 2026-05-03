@@ -55,9 +55,10 @@ export default function LearningMcq({
             } else {
               if (isCorrectOpt) {
                 optionClass +=
-                  'border-primary bg-storm-300/55 dark:bg-storm-700/30 text-slate-900 dark:text-white ring-2 ring-primary/30'
+                  'border-emerald-500 dark:border-emerald-500/70 bg-emerald-50/90 dark:bg-emerald-950/30 text-slate-900 dark:text-slate-100 ring-2 ring-emerald-500/30'
               } else if (picked) {
-                optionClass += 'border-red-400 dark:border-red-500 bg-red-50/90 dark:bg-red-950/25 text-slate-900 dark:text-slate-100'
+                optionClass +=
+                  'border-red-400 dark:border-red-500/70 bg-red-50/90 dark:bg-red-950/25 text-slate-900 dark:text-slate-100'
               } else {
                 optionClass +=
                   'border-slate-200/80 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 opacity-80'
