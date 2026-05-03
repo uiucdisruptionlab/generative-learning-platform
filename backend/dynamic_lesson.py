@@ -842,12 +842,45 @@ Return JSON only."""
             + (f" as it relates to {concept_names}?" if concept_names else "?")
         )
         itype = "free_response"
-        payload = {"question": fallback_q}
+        payload = {
+            "question": fallback_q,
+            "reference_answer": _fallback_free_response_answer(session, fallback_q),
+        }
+
+    if itype == "free_response" and not payload.get("reference_answer"):
+        payload["reference_answer"] = _fallback_free_response_answer(
+            session,
+            str(payload.get("question") or ""),
+        )
 
     if itype == "video":
         vctx = _video_search_context(session, reflection)
         payload = _resolve_video_widget_payload(payload, lesson, persona, context_focus=vctx)
     return {"assistant_message": msg, "interaction": {"type": itype, "payload": payload}}
+
+
+def _fallback_free_response_answer(session: dict[str, Any], question: str) -> str:
+    lesson = session["sources"]["lesson"]
+    last_block = session.get("last_step_block") or {}
+    concepts = lesson.get("concepts") or []
+    concept_names = ", ".join(
+        str(c.get("name") or "")
+        for c in concepts[:3]
+        if isinstance(c, dict) and c.get("name")
+    )
+    focus = str(last_block.get("title") or lesson.get("title") or "this lesson").strip()
+    content = " ".join(str(last_block.get("content") or "").split())
+    if len(content) > 260:
+        content = content[:260].rsplit(" ", 1)[0] + "..."
+    answer = f"A strong answer should explain the main idea from {focus}"
+    if concept_names:
+        answer += f" and connect it to {concept_names}"
+    answer += "."
+    if content:
+        answer += f" In this checkpoint, that means using the lesson explanation: {content}"
+    if question:
+        answer += " Then restate it in your own words rather than copying the wording exactly."
+    return answer
 
 
 def _session_performance_summary(session: dict[str, Any]) -> dict[str, Any]:
@@ -874,8 +907,14 @@ def _session_performance_summary(session: dict[str, Any]) -> dict[str, Any]:
                 correct += 1
             else:
                 incorrect += 1
+        elif atype == "free_response":
+            text = str(result.get("text") or "").strip()
+            if result.get("dont_know") or len(text.split()) < 6:
+                incorrect += 1
+            else:
+                correct += 1
         else:
-            # free_response, flashcards, video — counts as engaged if not skipped
+            # flashcards and video count as engaged if not skipped.
             correct += 1
 
     engaged = total - skipped
@@ -1139,7 +1178,14 @@ Return JSON only."""
             "cards": payload.get("cards") if isinstance(payload.get("cards"), list) else [],
         }
     elif activity_type == "free_response":
-        payload = {"question": str(payload.get("question") or "In your own words, what was the key idea?")}
+        question = str(payload.get("question") or "In your own words, what was the key idea?")
+        payload = {
+            "question": question,
+            "reference_answer": str(
+                payload.get("reference_answer")
+                or _fallback_free_response_answer(session, question)
+            ),
+        }
     else:  # video
         vctx = _video_search_context(session, learner_message)
         payload = _resolve_video_widget_payload(payload, lesson, persona, context_focus=vctx)
