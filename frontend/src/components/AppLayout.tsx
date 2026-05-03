@@ -39,16 +39,16 @@ export default function AppLayout({
   const avatarUrl = sidebarProfile?.avatarUrl ?? ''
 
   return (
-    <div className="flex min-h-screen overflow-x-hidden bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
+    <div className="flex min-h-screen overflow-x-hidden bg-gradient-to-br from-stone-50 via-storm-300/25 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
       <PersonaToggle currentPersona={currentPersona} onPersonaChange={setCurrentPersona} />
       <aside
-        className={`w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-r-2 border-primary/15 dark:border-primary/20 flex flex-col fixed h-full transition-transform duration-300 z-30 ${
+        className={`w-72 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border-r-2 border-industrial/25 dark:border-industrial/30 flex flex-col fixed h-full transition-transform duration-300 z-30 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         <div className="p-8">
           <div className="flex items-center gap-4 mb-10">
-            <div className="size-12 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-primary ring-1 ring-primary/20">
+            <div className="size-12 rounded-2xl bg-gradient-to-br from-illini-blue/15 to-primary/10 flex items-center justify-center text-illini-blue ring-1 ring-industrial/25">
               <span className="material-symbols-outlined text-3xl font-light">rocket_launch</span>
             </div>
             <div className="flex flex-col">
@@ -142,7 +142,9 @@ export default function AppLayout({
         </div>
       </aside>
 
-      <main className={`flex-1 min-w-0 transition-all duration-300 ${sidebarOpen ? 'ml-72' : 'ml-0'}`}>
+      <main
+        className={`flex-1 min-w-0 pb-28 transition-all duration-300 max-[480px]:pb-32 ${sidebarOpen ? 'ml-72' : 'ml-0'}`}
+      >
         <PageHeader
           sidebarOpen={sidebarOpen}
           onToggleSidebar={onToggleSidebar}

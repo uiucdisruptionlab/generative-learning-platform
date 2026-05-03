@@ -8,20 +8,40 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: "#2c5926",
-        forest: "#2c5926",
-        "canvas-green": "#287D3C",
-        "educational-teal": "#009688",
-        secondary: "#f59e0b",
-        accent: "#c2410c",
-        "burnt-orange": "#cc5500",
-        "warm-yellow": "#f4a900",
-        "soft-teal": "#E0F2F1",
-        "soft-yellow": "#FFF9C4",
-        "warm-orange": "#FFE0B2",
+        // UIUC Illini — primary brand
+        primary: "#FF5F05",
+        "primary-hover": "#E55604",
+        forest: "#FF5F05",
+        "primary-light": "#FCB316",
+        illini: {
+          blue: "#13294B",
+          orange: "#FF5F05",
+        },
+        // Secondary — Storm neutrals (backgrounds, text blocks)
+        storm: {
+          700: "#707372",
+          500: "#9C9A9D",
+          300: "#C8C6C7",
+        },
+        // Supporting — outlines & accents (Industrial, Arches, Patina, etc.)
+        industrial: "#1D58A7",
+        arches: "#009FD4",
+        patina: "#007E8E",
+        berry: "#5C0E41",
+        harvest: "#FCB316",
+        prairie: "#006230",
+        earth: "#7D3E13",
+        "canvas-green": "#1D58A7",
+        "educational-teal": "#009FD4",
+        secondary: "#FCB316",
+        accent: "#13294B",
+        "burnt-orange": "#FF5F05",
+        "warm-yellow": "#FCB316",
+        "soft-teal": "#E8F4FC",
+        "soft-yellow": "#FFF8E8",
+        "warm-orange": "#FFE8D6",
         "background-light": "#fafaf9",
-        "background-dark": "#1c1917",
-        "primary-light": "#2D6A4F",
+        "background-dark": "#13294B",
       },
       fontFamily: {
         display: ["DM Sans", "sans-serif"],
@@ -31,9 +51,12 @@ export default {
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
-        "gradient-card": "linear-gradient(135deg, rgba(44, 89, 38, 0.03) 0%, rgba(244, 169, 0, 0.03) 100%)",
-        "gradient-warm": "linear-gradient(135deg, #faf8f5 0%, #f5f0e8 100%)",
-        "gradient-accent": "linear-gradient(135deg, rgba(44, 89, 38, 0.08) 0%, rgba(204, 85, 0, 0.05) 100%)",
+        "gradient-card":
+          "linear-gradient(135deg, rgba(19, 41, 75, 0.04) 0%, rgba(255, 95, 5, 0.04) 100%)",
+        "gradient-warm":
+          "linear-gradient(135deg, #fafaf9 0%, #f0eeef 50%, #fafaf9 100%)",
+        "gradient-accent":
+          "linear-gradient(135deg, rgba(19, 41, 75, 0.07) 0%, rgba(255, 95, 5, 0.06) 100%)",
       },
       borderRadius: {
         lg: "0.75rem",

@@ -163,7 +163,7 @@ export default function LessonTranscriptPage() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-6">
-          <aside className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-emerald-200/70 dark:border-emerald-800/40 shadow-soft p-4 lg:sticky lg:top-8 self-start">
+          <aside className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-industrial/45 dark:border-industrial/35 shadow-soft p-4 lg:sticky lg:top-8 self-start">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3 px-1">
               Past sessions
             </h2>
@@ -201,7 +201,7 @@ export default function LessonTranscriptPage() {
             )}
           </aside>
 
-          <main className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-emerald-200/70 dark:border-emerald-800/40 shadow-soft p-6 lg:p-8 min-w-0">
+          <main className="rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm border-2 border-industrial/45 dark:border-industrial/35 shadow-soft p-6 lg:p-8 min-w-0">
             {loadingSession ? (
               <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-400 dark:text-slate-500">
                 <span className="material-symbols-outlined animate-spin text-3xl text-primary">progress_activity</span>

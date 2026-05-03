@@ -140,10 +140,10 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-stone-50 via-amber-50/30 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
-      <header className="flex items-center justify-between px-8 py-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b-2 border-emerald-200/60 dark:border-slate-700/50 shrink-0">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-stone-50 via-storm-300/25 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
+      <header className="flex items-center justify-between px-8 py-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b-2 border-industrial/35 dark:border-slate-700/50 shrink-0">
         <Link to="/login" className="flex items-center gap-4">
-          <div className="size-12 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-primary ring-1 ring-primary/20 shrink-0">
+          <div className="size-12 rounded-2xl bg-gradient-to-br from-illini-blue/15 to-primary/10 flex items-center justify-center text-illini-blue ring-1 ring-industrial/25 shrink-0">
             <span className="material-symbols-outlined text-3xl font-light">rocket_launch</span>
           </div>
           <h2 className="text-slate-900 dark:text-white text-base font-bold leading-tight font-logo tracking-normal">
@@ -174,7 +174,7 @@ export default function OnboardingPage() {
             <button
               type="button"
               onClick={handleContinue}
-              className="w-full bg-primary hover:bg-emerald-700 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all duration-300 transform hover:scale-[1.02]"
+              className="w-full bg-primary hover:bg-primary-hover text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all duration-300 transform hover:scale-[1.02]"
             >
               Continue to GLP →
             </button>
@@ -201,10 +201,10 @@ export default function OnboardingPage() {
                   {messages.map((m, i) => (
                     <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div
-                        className={`max-w-[85%] px-4 py-3 rounded-2xl ${
+                        className={`max-w-[85%] px-4 py-3 rounded-2xl border-2 shadow-sm ${
                           m.role === 'assistant'
-                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100'
-                            : 'bg-primary text-white'
+                            ? 'bg-white dark:bg-slate-800 border-industrial/45 dark:border-industrial/35 text-slate-800 dark:text-slate-100'
+                            : 'bg-primary border-primary-hover text-white'
                         }`}
                       >
                         {m.content}
@@ -213,7 +213,7 @@ export default function OnboardingPage() {
                   ))}
                   {loading && messages[messages.length - 1]?.role === 'user' && (
                     <div className="flex justify-start">
-                      <div className="bg-slate-100 dark:bg-slate-800 px-4 py-3 rounded-2xl text-slate-500">…</div>
+                      <div className="bg-white dark:bg-slate-800 border-2 border-industrial/45 dark:border-industrial/35 px-4 py-3 rounded-2xl text-slate-500 shadow-sm">…</div>
                     </div>
                   )}
                   <div ref={messagesEndRef} />
@@ -234,7 +234,7 @@ export default function OnboardingPage() {
                     <button
                       type="submit"
                       disabled={!input.trim() || loading}
-                      className="bg-primary text-white font-bold px-6 py-3 rounded-2xl hover:bg-primary-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      className="bg-primary text-white font-bold px-6 py-3 rounded-2xl hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       Send
                     </button>
