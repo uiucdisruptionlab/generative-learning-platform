@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -139,6 +140,17 @@ class ChatResponse(BaseModel):
     message: str
     profile: Dict[str, Any]
     done: bool
+
+
+class StudentUpdateRequest(BaseModel):
+    name: str | None = None
+    academic_level: str | None = None
+    major_or_field: str | None = None
+    learning_goals: Dict[str, Any] | None = None
+    interests: List[str] | None = None
+    weekly_hours: float | int | None = None
+    preferred_formats: List[str] | None = None
+    llm_profile: Dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1170,6 +1182,91 @@ def get_due_reviews_for_student(student_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _clean_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value).strip()
+
+
+def _clean_string_list(values: list[Any] | None) -> list[str] | None:
+    if values is None:
+        return None
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        key = text.lower()
+        if text and key not in seen:
+            cleaned.append(text)
+            seen.add(key)
+    return cleaned
+
+
+def _clean_json_object(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    cleaned: dict[str, Any] = {}
+    for key, raw in value.items():
+        safe_key = str(key).strip()
+        if not safe_key or raw is None:
+            continue
+        if isinstance(raw, str):
+            text = raw.strip()
+            if text:
+                cleaned[safe_key] = text
+        elif isinstance(raw, list):
+            cleaned_list = _clean_string_list(raw)
+            if cleaned_list:
+                cleaned[safe_key] = cleaned_list
+        elif isinstance(raw, dict):
+            nested = _clean_json_object(raw)
+            if nested:
+                cleaned[safe_key] = nested
+        else:
+            cleaned[safe_key] = raw
+    return cleaned
+
+
+def _merge_json_field(current: Any, updates: dict[str, Any] | None) -> dict[str, Any] | None:
+    if updates is None:
+        return None
+    base = current if isinstance(current, dict) else {}
+    return {**base, **updates}
+
+
+def _profile_cache_keys(student_id: str, profile: dict[str, Any]) -> set[str]:
+    keys = {student_id}
+    name = str(profile.get("name") or "").strip().lower()
+    if name:
+        keys.add(name)
+    # Demo persona IDs used by the frontend.
+    known_ids = {
+        "a0000001-0000-4000-8000-000000000001": "alice",
+        "b0000002-0000-4000-8000-000000000002": "bob",
+        "c0000003-0000-4000-8000-000000000003": "charles",
+    }
+    if student_id in known_ids:
+        keys.add(known_ids[student_id])
+    return keys
+
+
+def _clear_lesson_cache_for_profile(student_id: str, before: dict[str, Any], after: dict[str, Any]) -> None:
+    if not LESSON_CACHE_DIR.exists():
+        return
+    keys = _profile_cache_keys(student_id, before) | _profile_cache_keys(student_id, after)
+    for child in LESSON_CACHE_DIR.iterdir():
+        if not child.is_dir():
+            continue
+        folder = child.name.lower()
+        if not any(folder == key or folder.startswith(f"{key}_") for key in keys):
+            continue
+        for cache_file in child.glob("*.json"):
+            try:
+                cache_file.unlink()
+            except OSError as exc:
+                print(f"[server] failed to remove stale lesson cache {cache_file}: {exc}")
+
+
 @app.get("/student/{student_id}")
 def get_student(student_id: str) -> dict[str, Any]:
     from supabase_local import get_student_profile, get_supabase_client
@@ -1179,6 +1276,74 @@ def get_student(student_id: str) -> dict[str, Any]:
         if not profile:
             raise HTTPException(status_code=404, detail="student not found")
         return profile
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.patch("/student/{student_id}")
+def update_student(student_id: str, req: StudentUpdateRequest) -> dict[str, Any]:
+    from supabase_local import get_student_profile, get_supabase_client
+
+    try:
+        supabase = get_supabase_client()
+        current = get_student_profile(student_id, client=supabase)
+        if not current:
+            raise HTTPException(status_code=404, detail="student not found")
+
+        raw = req.model_dump(exclude_unset=True)
+        updates: dict[str, Any] = {}
+
+        for field in ("name", "academic_level", "major_or_field"):
+            if field in raw:
+                cleaned = _clean_optional_string(raw[field])
+                if cleaned is not None:
+                    updates[field] = cleaned
+
+        if "weekly_hours" in raw and raw["weekly_hours"] is not None:
+            updates["weekly_hours"] = max(0, int(round(float(raw["weekly_hours"]))))
+
+        for field in ("interests", "preferred_formats"):
+            if field in raw:
+                cleaned_list = _clean_string_list(raw[field])
+                if cleaned_list is not None:
+                    updates[field] = cleaned_list
+
+        if "learning_goals" in raw:
+            cleaned_goals = _clean_json_object(raw["learning_goals"])
+            merged_goals = _merge_json_field(current.get("learning_goals"), cleaned_goals)
+            if merged_goals is not None:
+                updates["learning_goals"] = merged_goals
+
+        if "llm_profile" in raw:
+            cleaned_llm_profile = _clean_json_object(raw["llm_profile"])
+            merged_llm_profile = _merge_json_field(current.get("llm_profile"), cleaned_llm_profile)
+            if merged_llm_profile is not None:
+                updates["llm_profile"] = merged_llm_profile
+
+        if not updates:
+            return current
+
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        response = (
+            supabase.table("students")
+            .update(updates)
+            .eq("id", student_id)
+            .execute()
+        )
+        rows = response.data or []
+        if rows:
+            _clear_lesson_cache_for_profile(student_id, current, rows[0])
+            return rows[0]
+        refreshed = get_student_profile(student_id, client=supabase)
+        if refreshed:
+            _clear_lesson_cache_for_profile(student_id, current, refreshed)
+            return refreshed
+        raise HTTPException(status_code=404, detail="student not found after update")
     except HTTPException:
         raise
     except Exception as exc:

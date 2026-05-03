@@ -142,6 +142,14 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
     }
 
 
+def _wants_videos(persona: dict[str, Any]) -> bool:
+    return any(
+        "video" in str(item).strip().lower()
+        or "youtube" in str(item).strip().lower()
+        for item in (persona.get("preferred_formats") or [])
+    )
+
+
 def resolve_student_id(persona_id: str) -> str:
     return _resolve_student_id(persona_id)
 
@@ -437,6 +445,7 @@ Major: {persona['major']}
 Familiarity with topic: {persona['familiarity']}
 Learning style: {persona['learning_style']}
 Hours available per week: {persona['hours_per_week']}
+Preferred formats: {json.dumps(persona.get('preferred_formats', []), ensure_ascii=False)}
 Interests: {json.dumps(persona.get('interests', []), ensure_ascii=False)}
 Learning goals: {json.dumps(persona.get('learning_goals', {}), ensure_ascii=False)}
 Additional notes: {persona['notes']}{srs_section}
@@ -450,6 +459,8 @@ AVAILABLE YOUTUBE VIDEOS:
 Personalization requirement:
 - Keep tutor narration in the learner's language preference (if specified elsewhere), but make
   examples, scenarios, and analogies explicitly relevant to the learner's interests/goals above.
+- Respect Preferred formats when choosing activities and supporting media. Avoid formats the learner
+  removed from their profile unless they explicitly ask for them later.
 
 Generate a personalized lesson following the output schema exactly.
 """.strip()
@@ -574,7 +585,7 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     search_query = " ".join(_sq_parts.split()[:10])
     video_search_error: str | None = None
     videos = []
-    if "videos" in persona.get("preferred_formats", []):
+    if _wants_videos(persona):
         try:
             videos = search_videos(search_query, max_results=3)
         except Exception as e:

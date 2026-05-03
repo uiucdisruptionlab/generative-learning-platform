@@ -42,7 +42,7 @@ def _merge_videos_from_lesson_cache(
     If YouTube returned nothing, reuse `videos` from a previously generated lesson JSON
     (classic /lesson cache) so interactive mode still shows links when offline or unconfigured.
     """
-    if sources.get("videos") or "videos" not in persona.get("preferred_formats", []):
+    if sources.get("videos") or not _wants_videos(persona):
         return None
     persona_id = persona.get("student_id") or persona.get("id") or ""
     folder = f"{persona_id}_{course}" if course else persona_id
@@ -78,6 +78,14 @@ def _video_status(
         if not isinstance(detail, str) or not detail:
             detail = None
     return {"source": src, "detail": detail}
+
+
+def _wants_videos(persona: dict[str, Any]) -> bool:
+    return any(
+        "video" in str(item).strip().lower()
+        or "youtube" in str(item).strip().lower()
+        for item in (persona.get("preferred_formats") or [])
+    )
 
 STEP_TYPES: list[tuple[str, str]] = [
     ("concept", "Introduce core definitions and intuition. Stay grounded in the source material."),
@@ -516,6 +524,7 @@ def _persona_block(persona: dict[str, Any]) -> str:
             "familiarity": persona.get("familiarity"),
             "learning_style": persona.get("learning_style"),
             "hours_per_week": persona.get("hours_per_week"),
+            "preferred_formats": persona.get("preferred_formats"),
             "interests": persona.get("interests"),
             "learning_goals": persona.get("learning_goals"),
             "notes": persona.get("notes"),
@@ -582,6 +591,36 @@ Return JSON only."""
         f"Welcome back — this is your {ordinal} attempt at this lesson.{gap_note} "
         "Today's session has been adapted to focus on those areas. Let's work through it together."
     )
+
+
+def _allowed_activity_types(persona: dict[str, Any]) -> set[str]:
+    preferred = {
+        str(item).strip().lower()
+        for item in (persona.get("preferred_formats") or [])
+        if str(item).strip()
+    }
+    allowed = {"mcq", "free_response"}
+    if any("flash" in item or "card" in item for item in preferred):
+        allowed.add("flashcards")
+    if any("video" in item or "youtube" in item for item in preferred):
+        allowed.add("video")
+    return allowed
+
+
+def _coerce_allowed_activity_type(
+    itype: str,
+    persona: dict[str, Any],
+    *,
+    requested_by_learner: bool = False,
+) -> str:
+    if itype in {"none", "mcq", "free_response"}:
+        return itype
+    allowed = _allowed_activity_types(persona)
+    if requested_by_learner and itype == "video":
+        return itype
+    if itype in allowed:
+        return itype
+    return "mcq"
 
 
 def _run_overview_llm(session: dict[str, Any]) -> str:
@@ -700,7 +739,7 @@ def _resolve_video_widget_payload(
     q = " ".join(q.split()[:10])
 
     results: list[dict[str, Any]] = []
-    if "videos" in persona.get("preferred_formats", []):
+    if _wants_videos(persona):
         try:
             results = search_videos(q, max_results=5)
         except Exception as exc:
@@ -763,6 +802,7 @@ def _run_engage_llm(session: dict[str, Any], step_index: int, reflection: str) -
     persona = session["sources"]["persona"]
     last_block = session.get("last_step_block") or {}
     last_activity = session.get("last_activity")
+    allowed_activities = sorted(_allowed_activity_types(persona))
     engage_chunks = _contextual_source_chunks(session, kind="engage", reflection=reflection)
     dialogue = _recent_transcript_for_context(session)
     system = """You are an expert tutor. Return valid JSON only. No markdown fences.
@@ -795,7 +835,7 @@ SOURCE EXCERPTS below are retrieved for THIS moment (last segment + their messag
 
 Activity selection — DEFAULT TO GENERATING AN ACTIVITY at every checkpoint:
 - mcq: use for quick factual checks; prefer this as the default when unsure.
-- flashcards: use when there are multiple distinct terms or relationships to reinforce.
+- flashcards: use ONLY when the learner's preferred_formats includes flashcards/cards.
 - free_response: use when an open-ended explanation would deepen understanding.
 - video: use only when the learner explicitly asks to watch a clip or wants audiovisual explanation.
 - none: ONLY if the learner's reflection is already a detailed, multi-sentence explanation covering ALL the key points from the segment — a brief acknowledgement or single sentence is NOT enough to skip the activity. If in doubt, default to mcq.
@@ -803,6 +843,7 @@ Keep assistant wording and examples aligned with LEARNER interests/goals; avoid 
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
 LEARNER: {_persona_block(persona)}
+ALLOWED_ACTIVITY_TYPES: {json.dumps(allowed_activities, ensure_ascii=False)}
 
 LAST TEACHING SEGMENT TITLE: {last_block.get("title")}
 LAST TEACHING SEGMENT (excerpt): {(last_block.get("content") or "")[:1200]}
@@ -829,6 +870,7 @@ Return JSON only."""
     itype = str(inter.get("type") or "none").lower()
     if itype not in ("none", "mcq", "flashcards", "free_response", "video"):
         itype = "none"
+    itype = _coerce_allowed_activity_type(itype, persona)
     payload = inter.get("payload") if isinstance(inter.get("payload"), dict) else {}
 
     # Fallback: if the LLM chose none but the reflection is brief, force a free_response check.
@@ -1118,6 +1160,11 @@ def _run_forced_activity_llm(
     """
     lesson = session["sources"]["lesson"]
     persona = session["sources"]["persona"]
+    activity_type = _coerce_allowed_activity_type(
+        activity_type,
+        persona,
+        requested_by_learner=_requested_activity_type(learner_message) == activity_type,
+    )  # type: ignore[assignment]
     last_block = session.get("last_step_block") or {}
     dialogue = _recent_transcript_for_context(session, max_chars=2200)
     chunks = _contextual_source_chunks(
