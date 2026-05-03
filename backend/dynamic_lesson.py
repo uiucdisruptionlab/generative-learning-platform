@@ -35,15 +35,16 @@ _LESSON_CACHE_DIR = Path(__file__).resolve().parent / "lesson_cache"
 def _merge_videos_from_lesson_cache(
     sources: dict[str, Any],
     lesson_id: str,
-    persona_id: str,
+    persona: dict[str, Any],
     course: str | None,
 ) -> str | None:
     """
     If YouTube returned nothing, reuse `videos` from a previously generated lesson JSON
     (classic /lesson cache) so interactive mode still shows links when offline or unconfigured.
     """
-    if sources.get("videos"):
+    if sources.get("videos") or "videos" not in persona.get("preferred_formats", []):
         return None
+    persona_id = persona.get("student_id") or persona.get("id") or ""
     folder = f"{persona_id}_{course}" if course else persona_id
     path = _LESSON_CACHE_DIR / folder / f"{lesson_id}.json"
     if not path.exists():
@@ -74,13 +75,8 @@ def _video_status(
     else:
         src = "none"
         detail = sources.get("video_search_error")
-        if isinstance(detail, str) and detail:
-            pass
-        else:
-            detail = (
-                "No videos to show. Set YOUTUBE_API_KEY in backend/.env, restart the server, "
-                "or open the classic lesson once to build cache."
-            )
+        if not isinstance(detail, str) or not detail:
+            detail = None
     return {"source": src, "detail": detail}
 
 STEP_TYPES: list[tuple[str, str]] = [
@@ -672,6 +668,7 @@ Write segment {step_index + 1}/{len(STEP_TYPES)} now. Return JSON only."""
 def _resolve_video_widget_payload(
     raw: dict[str, Any],
     lesson: dict[str, Any],
+    persona: dict[str, Any],
     *,
     context_focus: str | None = None,
 ) -> dict[str, Any]:
@@ -703,10 +700,13 @@ def _resolve_video_widget_payload(
     q = " ".join(q.split()[:10])
 
     results: list[dict[str, Any]] = []
-    try:
-        results = search_videos(q, max_results=5)
-    except Exception as exc:
-        print(f"[dynamic_lesson] YouTube search for video widget failed: {exc}")
+    if "videos" in persona.get("preferred_formats", []):
+        try:
+            results = search_videos(q, max_results=5)
+        except Exception as exc:
+            print(f"[dynamic_lesson] YouTube search for video widget failed: {exc}")
+    else:
+        print(f"[dynamic_lesson] Skipping YouTube search: videos not in learner's preferred formats.")
 
     if results:
         results = sorted(results, key=lambda v: _video_score(q, v), reverse=True)
@@ -846,7 +846,7 @@ Return JSON only."""
 
     if itype == "video":
         vctx = _video_search_context(session, reflection)
-        payload = _resolve_video_widget_payload(payload, lesson, context_focus=vctx)
+        payload = _resolve_video_widget_payload(payload, lesson, persona, context_focus=vctx)
     return {"assistant_message": msg, "interaction": {"type": itype, "payload": payload}}
 
 
@@ -1142,7 +1142,7 @@ Return JSON only."""
         payload = {"question": str(payload.get("question") or "In your own words, what was the key idea?")}
     else:  # video
         vctx = _video_search_context(session, learner_message)
-        payload = _resolve_video_widget_payload(payload, lesson, context_focus=vctx)
+        payload = _resolve_video_widget_payload(payload, lesson, persona, context_focus=vctx)
 
     return msg, payload
 
@@ -1161,7 +1161,7 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
     _prune_sessions()
     sources = load_lesson_sources(lesson_id, persona_id, course)
     had_youtube_results = bool(sources.get("videos"))
-    cache_note = _merge_videos_from_lesson_cache(sources, lesson_id, persona_id, course)
+    cache_note = _merge_videos_from_lesson_cache(sources, lesson_id, sources.get("persona") or {}, course)
     video_status = _video_status(sources, had_youtube_results, cache_note)
 
     session_id = str(uuid.uuid4())
@@ -1537,6 +1537,7 @@ def enqueue_widget(session_id: str, widget: dict[str, Any], *, note: str | None 
         raise ValueError("payload must be an object")
     if wtype == "video":
         lesson = session["sources"]["lesson"]
+        persona = session["sources"]["persona"]
         last_ref = ""
         for e in reversed(session.get("transcript") or []):
             if e.get("role") != "user":
@@ -1547,7 +1548,7 @@ def enqueue_widget(session_id: str, widget: dict[str, Any], *, note: str | None 
             last_ref = c[:800]
             break
         vf = _video_search_context(session, last_ref)
-        payload = _resolve_video_widget_payload(payload, lesson, context_focus=vf)
+        payload = _resolve_video_widget_payload(payload, lesson, persona, context_focus=vf)
     session["pending_widget"] = {"type": wtype, "payload": payload}
     if note:
         _append_assistant(session, note, meta={"kind": "widget_enqueue"})
