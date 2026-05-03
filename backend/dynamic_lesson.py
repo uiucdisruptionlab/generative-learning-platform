@@ -1939,6 +1939,45 @@ def _save_session_to_db(session: dict[str, Any]) -> None:
     client = get_supabase_client()
     client.table("lesson_sessions").upsert(row, on_conflict="session_id").execute()
 
+    if session_type == "lesson" and passed:
+        _advance_roadmap_past_lesson(student_id, lesson_id, course_id, client)
+
+
+def _advance_roadmap_past_lesson(
+    student_id: str,
+    lesson_id: str,
+    course_id: str,
+    client: Any,
+) -> None:
+    """Advance roadmap_position to the first concept of the next lesson once a lesson is passed."""
+    from srs import get_roadmap_position, set_roadmap_position
+
+    try:
+        roadmap = _load_lesson_roadmap_for_student(student_id)
+        if not roadmap:
+            print(f"[roadmap] no roadmap found for student={student_id}, skipping advance")
+            return
+        flat_idx = 0
+        for lsn in roadmap.get("lessons") or []:
+            concepts = lsn.get("concepts") or []
+            count = len(concepts)
+            if not count:
+                continue
+            if str(lsn.get("lesson_id") or "") == lesson_id:
+                next_index = flat_idx + count
+                position = get_roadmap_position(student_id, course_id=course_id, client=client)
+                current_index = int(position.get("current_index") or 0)
+                if next_index > current_index:
+                    set_roadmap_position(student_id, next_index, course_id=course_id, client=client)
+                    print(f"[roadmap] advanced  lesson={lesson_id}  index={current_index}→{next_index}")
+                else:
+                    print(f"[roadmap] position already past lesson={lesson_id} (current={current_index}, next={next_index}), skipping")
+                return
+            flat_idx += count
+        print(f"[roadmap] lesson_id={lesson_id} not found in roadmap for student={student_id}")
+    except Exception as exc:
+        print(f"[roadmap] advance failed (non-fatal): {exc}")
+
 
 def enqueue_widget(session_id: str, widget: dict[str, Any], *, note: str | None = None) -> dict[str, Any]:
     """
