@@ -6,7 +6,6 @@ import type { HomeRoadmapConcept, HomeRoadmapOutcome } from '../data/homeRoadmap
 import { usePersona } from '../contexts/PersonaContext'
 import {
   fetchHomeData,
-  startSession,
   type DueSrsRecord,
   type GeneratedRoadmap,
   type GeneratedRoadmapConcept,
@@ -215,13 +214,10 @@ export default function HomePage() {
     })
   }, [homeData?.srsDue.due])
   const firstDueDate = dueReviews[0]?.next_review_at ? new Date(dueReviews[0].next_review_at) : null
-  const handleStartHere = async (event: MouseEvent<HTMLAnchorElement>) => {
+  const handleStartHere = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault()
-    try {
-      const session = await startSession(studentId)
-      navigate(`/lesson?session_id=${encodeURIComponent(session.session_id)}`)
-    } catch (err) {
-      setError(String(err))
+    if (activeLesson?.lesson_id) {
+      navigate(`/lesson/${encodeURIComponent(activeLesson.lesson_id)}/interactive`)
     }
   }
 
@@ -319,11 +315,11 @@ export default function HomePage() {
             showViewFullLink
             scrollable
             outcomes={roadmapOutcomes}
-            startHereTo={activeLesson ? `/lesson?lesson_id=${encodeURIComponent(activeLesson.lesson_id)}` : homeRoadmapPath}
+            startHereTo={activeLesson ? `/lesson/${encodeURIComponent(activeLesson.lesson_id)}/interactive` : homeRoadmapPath}
             viewFullTo={homeRoadmapPath}
             onStartHere={handleStartHere}
-            buildTranscriptHref={(concept) =>
-              `/lesson/transcript?student_id=${encodeURIComponent(studentId)}&concept_id=${encodeURIComponent(concept.id)}`
+            buildTranscriptHref={(_concept, outcome) =>
+              `/lesson/transcript?student_id=${encodeURIComponent(studentId)}&concept_id=${encodeURIComponent(outcome.id)}`
             }
           />
         </section>

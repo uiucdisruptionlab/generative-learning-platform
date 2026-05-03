@@ -211,29 +211,56 @@ function FreeResponseWidget({
 }) {
   const [text, setText] = useState('')
   const [sent, setSent] = useState(false)
+  const [dontKnow, setDontKnow] = useState(false)
+
+  const handleDontKnow = () => {
+    setDontKnow(true)
+    setSent(true)
+    onSubmit({ text: '', dont_know: true })
+  }
 
   return (
     <div className="rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 p-5 space-y-3">
       <p className="text-sm font-medium text-slate-900 dark:text-white">{payload.question}</p>
-      <textarea
-        value={text}
-        disabled={disabled || sent}
-        onChange={(e) => setText(e.target.value)}
-        rows={4}
-        className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-3 text-sm focus:border-primary focus:outline-none disabled:opacity-50"
-        placeholder="Type your answer…"
-      />
-      <button
-        type="button"
-        disabled={disabled || sent || !text.trim()}
-        onClick={() => {
-          setSent(true)
-          onSubmit({ text: text.trim() })
-        }}
-        className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-40"
-      >
-        Submit
-      </button>
+      {dontKnow && payload.reference_answer && (
+        <div className="rounded-xl border-2 border-amber-200 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-950/30 p-4 space-y-1">
+          <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">Model answer</p>
+          <p className="text-sm text-slate-800 dark:text-slate-100 leading-relaxed">{payload.reference_answer}</p>
+        </div>
+      )}
+      {!sent && (
+        <>
+          <textarea
+            value={text}
+            disabled={disabled}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            className="w-full rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-3 text-sm focus:border-primary focus:outline-none disabled:opacity-50"
+            placeholder="Type your answer…"
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={disabled || !text.trim()}
+              onClick={() => {
+                setSent(true)
+                onSubmit({ text: text.trim() })
+              }}
+              className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-40"
+            >
+              Submit
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={handleDontKnow}
+              className="px-4 py-2 rounded-xl border-2 border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 text-sm font-medium hover:border-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors disabled:opacity-40"
+            >
+              I don&apos;t know
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -385,6 +412,20 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
     return <UserTurn content={entry.content} />
   }
 
+  if (kind === 'prior_performance') {
+    return (
+      <section className="rounded-2xl border-2 border-amber-300/70 dark:border-amber-700/50 bg-amber-50/60 dark:bg-amber-950/30 p-6 shadow-soft">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="material-symbols-outlined text-amber-600 dark:text-amber-400">history</span>
+          <span className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+            Picking up from last time
+          </span>
+        </div>
+        <p className="text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+      </section>
+    )
+  }
+
   if (kind === 'overview') {
     return (
       <section className="rounded-2xl bg-primary/5 dark:bg-primary/10 border-2 border-primary/20 p-6 shadow-soft">
@@ -456,6 +497,42 @@ function TranscriptBlock({ entry }: { entry: InteractiveTranscriptEntry }) {
     )
   }
 
+  if (kind === 'block') {
+    const blockType = typeof meta.block_type === 'string' ? meta.block_type : ''
+    const content = meta.content && typeof meta.content === 'object' ? meta.content as Record<string, unknown> : {}
+    if (blockType === 'video') {
+      const title = String(content.title || content.search_query || 'Video')
+      const url = String(content.url || '')
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50/60 dark:bg-red-950/20 border border-red-200/60 dark:border-red-900/40 text-sm text-slate-700 dark:text-slate-300">
+          <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-base flex-shrink-0">smart_display</span>
+          {url ? (
+            <a href={url} target="_blank" rel="noopener noreferrer" className="hover:underline text-primary">{title}</a>
+          ) : (
+            <span>{title}</span>
+          )}
+        </div>
+      )
+    }
+    if (blockType === 'flashcard') {
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/40 text-sm text-slate-700 dark:text-slate-300">
+          <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-base flex-shrink-0">style</span>
+          <span>{String(content.front || 'Flashcard activity')}</span>
+        </div>
+      )
+    }
+    if (blockType === 'mcq') {
+      return (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300">
+          <span className="material-symbols-outlined text-slate-500 text-base flex-shrink-0">quiz</span>
+          <span>{String(content.question || 'Quiz question')}</span>
+        </div>
+      )
+    }
+    return null
+  }
+
   return (
     <section className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/60 p-5">
       <p className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">{entry.content}</p>
@@ -492,7 +569,13 @@ function normalizePendingWidget(raw: unknown): PendingWidget | null {
     return { type: 'flashcards', payload: { concepts, cards } }
   }
   if (t === 'free_response') {
-    return { type: 'free_response', payload: { question: String(p.question ?? '') } }
+    return {
+      type: 'free_response',
+      payload: {
+        question: String(p.question ?? ''),
+        reference_answer: p.reference_answer != null ? String(p.reference_answer) : undefined,
+      },
+    }
   }
   if (t === 'video') {
     return {
@@ -558,6 +641,25 @@ export default function InteractiveLessonPage() {
     },
     [state?.session_id],
   )
+
+  const handleRestart = useCallback(async () => {
+    if (!lessonId) return
+    setLoading(true)
+    setError(null)
+    setState(null)
+    // Remove stale session_id from URL so a page refresh also starts fresh
+    const next = new URLSearchParams(window.location.search)
+    next.delete('session_id')
+    window.history.replaceState({}, '', `${window.location.pathname}${next.toString() ? '?' + next : ''}`)
+    try {
+      const s = await startInteractiveLesson(lessonId, persona, courseOverride)
+      setState({ ...s, pending_widget: normalizePendingWidget(s.pending_widget) })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [lessonId, persona, courseOverride])
 
   useEffect(() => {
     if (!lessonId && !sessionOverride) return
@@ -632,6 +734,18 @@ export default function InteractiveLessonPage() {
           </div>
         ) : state ? (
           <div className="space-y-8">
+            {state.session_type === 'review' && (state.review_count ?? 0) > 0 && (
+              <div className="rounded-xl border-2 border-indigo-200/70 dark:border-indigo-800/50 bg-indigo-50/50 dark:bg-indigo-950/30 px-5 py-4 flex items-start gap-3">
+                <span className="material-symbols-outlined text-indigo-500 dark:text-indigo-400 text-xl mt-0.5 flex-shrink-0">refresh</span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Clearing spaced-repetition reviews first</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                    You have {state.review_count} concept{(state.review_count ?? 0) > 1 ? 's' : ''} due for review. Complete these before the lesson starts.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {state.video_status?.source === 'lesson_cache' && state.video_status.detail && (
               <div className="rounded-xl border border-amber-200/80 dark:border-amber-800/50 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
                 <span className="material-symbols-outlined align-middle text-base mr-1">info</span>
@@ -717,6 +831,7 @@ export default function InteractiveLessonPage() {
                 </p>
                 {pending.type === 'mcq' && (
                   <McqWidget
+                    key={pending.payload.question}
                     payload={pending.payload}
                     disabled={busy}
                     onSubmit={(widget_result) => runTick({ widget_result })}
@@ -724,6 +839,7 @@ export default function InteractiveLessonPage() {
                 )}
                 {pending.type === 'flashcards' && (
                   <FlashcardsWidget
+                    key={pending.payload.cards?.[0]?.front ?? pending.payload.concepts?.[0]?.name}
                     payload={pending.payload}
                     disabled={busy}
                     onSubmit={(widget_result) => runTick({ widget_result })}
@@ -810,14 +926,78 @@ export default function InteractiveLessonPage() {
               </section>
             )}
 
-            {state.awaiting === 'none' && (
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                You&apos;re at the end of this walkthrough.{' '}
-                <Link className="text-primary underline" to="/roadmap">
-                  Back to your roadmap
+            {state.awaiting === 'none' && state.session_type !== 'gated' && (
+              <section className="rounded-2xl border-2 border-primary/25 bg-primary/5 dark:bg-primary/10 px-6 py-6 space-y-4">
+                {state.session_type === 'review' ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary text-2xl">task_alt</span>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Reviews cleared!</h3>
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      Your spaced-repetition reviews are up to date. Ready to continue with today's lesson?
+                    </p>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleRestart}
+                      className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-light transition-colors disabled:opacity-40"
+                    >
+                      <span className="material-symbols-outlined text-base">arrow_forward</span>
+                      Continue to lesson
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary text-2xl">task_alt</span>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Lesson complete</h3>
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      Your responses have been saved to your SRS record. The spaced-repetition algorithm will schedule any weak concepts for review in future sessions.
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={handleRestart}
+                        className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-light transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-base">replay</span>
+                        Repeat this lesson
+                      </button>
+                      <Link
+                        to="/roadmap"
+                        className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-primary/60 hover:text-primary transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-base">arrow_back</span>
+                        Back to roadmap
+                      </Link>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
+            {state.session_type === 'gated' && state.gated_info && (
+              <section className="rounded-2xl border-2 border-amber-300/70 dark:border-amber-700/50 bg-amber-50/60 dark:bg-amber-950/30 px-6 py-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-2xl">lock</span>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Lesson locked</h3>
+                </div>
+                <p className="text-sm text-slate-700 dark:text-slate-300">
+                  Your average score on the previous lesson was{' '}
+                  <span className="font-semibold">{state.gated_info.avg_score.toFixed(1)}/5</span>, which is below the
+                  threshold of <span className="font-semibold">{state.gated_info.threshold}/5</span> needed to move on.
+                  Go back and repeat the previous lesson until you reach that threshold.
+                </p>
+                <Link
+                  to="/roadmap"
+                  className="inline-flex items-center gap-2 rounded-xl border-2 border-amber-400 dark:border-amber-600 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">arrow_back</span>
+                  Back to roadmap
                 </Link>
-                .
-              </p>
+              </section>
             )}
 
             {import.meta.env.DEV && (

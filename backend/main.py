@@ -18,9 +18,9 @@ def process_pdf(
     pinecone_index: str,
     pinecone_api_key: str,
     unstructured_api_key: str,
+    namespace: str,
     enable_graph_ingestion: bool = False,
     graph_only: bool = False,
-    namespace: str = "DL_Transcripts",
 ):
     """
     Orchestrates the full pipeline: extract -> chunk -> embed -> upsert.
@@ -89,7 +89,7 @@ def process_pdf(
             print("No records to upsert")
 
 
-def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key):
+def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_api_key, namespace):
     if not os.path.exists(folder_path):
         raise RuntimeError(f"Folder does not exist: {folder_path}")
 
@@ -108,7 +108,7 @@ def process_folder(folder_path, pinecone_index, pinecone_api_key, unstructured_a
 
         try:
             print(f"Processing: {file_name}")
-            process_pdf(pdf_path, pinecone_index, pinecone_api_key, unstructured_api_key)
+            process_pdf(pdf_path, pinecone_index, pinecone_api_key, unstructured_api_key, namespace=namespace)
             print(f"Finished: {file_name}\n")
         except Exception as e:
             print(f"Error processing {file_name}: {e}\n")
@@ -129,12 +129,16 @@ if __name__ == "__main__":
 
     # --- Configure which file/folder to process ---
     file_path = os.path.join(_script_dir, "sample_data", "accounting", "ALecFinal.pdf")
+    accounting_folder_path = os.path.join(_script_dir, "missing_files", "accounting")
+    python_folder_path = os.path.join(_script_dir, "missing_files", "python")
+    accounting_namespace = "15.501_Transcripts"
+    python_namespace = "6.0001_Transcripts"
 
-    process_pdf(
-        file_path,
+
+    process_folder(
+        accounting_folder_path,
         pinecone_index,
         pinecone_api_key,
         unstructured_api_key,
-        enable_graph_ingestion=enable_graph_ingestion,
-        graph_only=graph_only,
+        namespace=accounting_namespace
     )

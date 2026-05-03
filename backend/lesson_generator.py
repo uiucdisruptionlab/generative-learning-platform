@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from bedrock.client import create_bedrock_runtime_client
 from youtube.client import search_videos
 
 _BACKEND_DIR = Path(__file__).resolve().parent
@@ -20,76 +19,12 @@ _spec.loader.exec_module(_glp_sc)
 get_student_profile = _glp_sc.get_student_profile
 get_supabase_client = _glp_sc.get_supabase_client
 
-AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
-
 COURSE_NAMESPACES: dict[str, str] = {
     "accounting": "15.501_Transcripts",
     "python": "6.0001_Transcripts",
     "financing": "11.437_Transcripts",
+    "BIS512": "BIS512",
 }
-
-# Seeded IDs from backend/supabase/seed_students.sql
-DEMO_PERSONA_TO_STUDENT_ID: dict[str, str] = {
-    "charles": "c0000003-0000-4000-8000-000000000003",
-}
-
-SYSTEM_PROMPT = """
-You are an expert educational content creator. Your job is to generate a personalized lesson for a student based on:
-- The lesson topic and concepts
-- Raw source material (lecture chunks)
-- The student's learner profile
-- Relevant YouTube videos
-
-Return JSON only. No markdown. No prose outside JSON.
-
-Output schema:
-{
-  "lesson_id": "string",
-  "title": "string",
-  "overview": "string (2-3 sentences introducing the lesson and why it matters)",
-  "steps": [
-    {
-      "step_number": 1,
-      "title": "string",
-      "type": "concept" | "example" | "summary",
-      "content": "string (rich explanation, tailored to the learner profile)"
-    }
-  ],
-  "videos": [
-    {
-      "title": "string",
-      "url": "string",
-      "channel": "string",
-      "thumbnail": "string",
-      "reason": "string (one sentence on why this video is relevant)"
-    }
-  ],
-  "questions": [
-    {
-      "type": "multiple_choice" | "fill_in_the_blank",
-      "question": "string",
-      "options": ["string"] (only for multiple_choice, 4 options),
-      "answer": "string",
-      "explanation": "string (brief explanation of why this is the correct answer)"
-    }
-  ]
-}
-
-Rules:
-- Tailor the depth, tone, and structure of every step to the learner profile provided.
-- Personalize examples and analogies to the learner's interests and goals/career direction whenever relevant.
-- Steps should flow logically: start with core concepts, then move to examples, then a summary.
-- Aim for exactly 3 steps.
-- Generate exactly 3 questions. Mix multiple choice and fill in the blank.
-- Questions should test genuine understanding, not just recall.
-- Use only concepts and facts present in the source material. Do not invent information.
-- Keep the overview to 2 sentences max.
-- Keep each step's content under 100 words.
-- For fill_in_the_blank questions, use ___ to mark the blank in the question string.
-- The "options" field should only appear for multiple_choice questions.
-- Be concise throughout — this is a summary lesson, not a textbook.
-""".strip()
 
 
 def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: str | None) -> dict[str, Any]:
@@ -109,12 +44,19 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
     if not isinstance(goals, dict):
         goals = {"raw": str(goals)}
 
-    course = str(goals.get("course") or goals.get("target_course") or course_fallback or "accounting").lower()
-    if "python" in course:
-        course = "python"
-    elif "financ" in course and "account" not in course:
-        course = "financing"
-    else:
+    # Resolve course from student_courses table; fall back to course_override if provided.
+    course = course_fallback or ""
+    student_id = str(profile.get("id") or "")
+    if not course and student_id:
+        try:
+            supabase = get_supabase_client()
+            sc_resp = supabase.table("student_courses").select("course_id").eq("student_id", student_id).limit(1).execute()
+            sc_rows = sc_resp.data or []
+            if sc_rows:
+                course = str(sc_rows[0]["course_id"])
+        except Exception:
+            pass
+    if not course:
         course = "accounting"
 
     learning_style = (
@@ -134,7 +76,12 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
         "notes": str(llm_profile.get("notes") or ""),
         "interests": [str(x) for x in interests if str(x).strip()],
         "learning_goals": goals,
+        "preferred_formats": [str(x) for x in preferred_formats if str(x).strip()],
     }
+
+
+def resolve_student_id(persona_id: str) -> str:
+    return _resolve_student_id(persona_id)
 
 
 def _resolve_student_id(persona_id: str) -> str:
@@ -144,12 +91,16 @@ def _resolve_student_id(persona_id: str) -> str:
     # Accept explicit UUID directly.
     if re.fullmatch(r"[0-9a-fA-F-]{36}", p):
         return p.lower()
-    sid = DEMO_PERSONA_TO_STUDENT_ID.get(p.lower())
-    if not sid:
-        raise ValueError(
-            f"Unknown persona '{persona_id}'. For now, supported alias is 'charles' or pass a student UUID."
-        )
-    return sid
+    # Look up by name in Supabase students table.
+    try:
+        supabase = get_supabase_client()
+        resp = supabase.table("students").select("id").ilike("name", p).limit(1).execute()
+        rows = resp.data or []
+        if rows:
+            return str(rows[0]["id"])
+    except Exception as exc:
+        raise ValueError(f"Failed to resolve student '{persona_id}': {exc}") from exc
+    raise ValueError(f"No student found with name '{persona_id}'. Pass a name matching the students table or a UUID directly.")
 
 
 def _load_persona_from_supabase(persona_id: str, *, course_override: str | None) -> dict[str, Any]:
@@ -321,98 +272,145 @@ def _fetch_chunks_from_pinecone(
         return [], meta, []
 
 
-COURSE_KEY_MAP: dict[str, str] = {
-    "ALecFinal": "accounting",
-    "accounting": "accounting",
-    "python": "python",
-    "financing": "financing",
-}
 
+def _build_composite_srs_context(
+    records: list[dict[str, Any]],
+    name_map: dict[str, str],
+) -> tuple[dict[str, Any], str]:
+    """Build an srs_context string and a synthetic srs_record from multiple concept records.
 
-def _load_roadmap_cache(course: str) -> dict[str, Any]:
-    key = COURSE_KEY_MAP.get(course, course)
-    cache_path = Path(__file__).parent / f"roadmap_cache_{key}.json"
-    if not cache_path.exists():
-        raise FileNotFoundError(f"roadmap_cache_{key}.json not found. Hit GET /roadmap?course={course} first.")
-    return json.loads(cache_path.read_text(encoding="utf-8"))
+    Returns (synthetic_record, context_string). The synthetic record keeps
+    _run_prior_performance_llm working without changes.
+    """
+    if not records:
+        return {}, ""
 
+    avg_score = sum(float(r.get("score") or 0) for r in records) / len(records)
+    min_ease = min(float(r.get("ease_factor") or 2.5) for r in records)
+    max_reps = max(int(r.get("repetitions") or 0) for r in records)
 
-def _get_lesson_from_cache(lesson_id: str, course: str) -> dict[str, Any]:
-    roadmap = _load_roadmap_cache(course)
-    for lesson in roadmap.get("lessons", []):
-        if lesson["lesson_id"] == lesson_id:
-            return lesson
-    raise ValueError(f"Lesson '{lesson_id}' not found in roadmap cache for course '{course}'.")
+    if min_ease < 1.8 or avg_score < 3:
+        assessment = "struggling"
+        directive = (
+            "Remediate — use simpler language, more concrete examples, and rebuild from "
+            "first principles. Do not assume prior understanding carries over."
+        )
+    elif min_ease >= 2.8 and avg_score >= 4:
+        assessment = "strong"
+        directive = (
+            "Student has a strong grasp. Go deeper, introduce nuance, and include a more "
+            "challenging question that tests edge cases."
+        )
+    else:
+        assessment = "progressing"
+        directive = (
+            "Student is making steady progress. Reinforce core concepts and address any "
+            "gaps with targeted examples."
+        )
 
+    lines = [
+        "PRIOR PERFORMANCE ON THIS LESSON:",
+        f"- Attempts: {max_reps}",
+        f"- Average concept score: {avg_score:.1f}/5",
+        f"- Assessment: {assessment}",
+        f"→ {directive}",
+    ]
 
-def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict]) -> str:
-    concepts_text = "\n".join(
-        f"- {c['name']}: {c.get('description', '')}" for c in lesson.get("concepts", [])
-    )
-    chunks_text = (
-        "\n\n---\n\n".join(chunks)
-        if chunks
-        else "[No lecture excerpts loaded — use CONCEPTS only. Do not tell the learner to install software.]"
-    )
-    videos_text = json.dumps(videos, indent=2) if videos else "[]"
+    weak_lines: list[str] = []
+    strong_lines: list[str] = []
+    all_gaps: list[str] = []
+    all_strengths: list[str] = []
+    for r in sorted(records, key=lambda x: float(x.get("score") or 0)):
+        cid = str(r.get("concept_id") or "")
+        cname = name_map.get(cid) or cid[:16]
+        score = float(r.get("score") or 0)
+        gaps = str(r.get("last_gaps") or "").strip()
+        strengths = str(r.get("last_strengths") or "").strip()
+        if score < 3:
+            weak_lines.append(f"  • {cname}" + (f": {gaps}" if gaps else ""))
+            if gaps:
+                all_gaps.append(f"{cname}: {gaps}")
+        elif score >= 4:
+            strong_lines.append(f"  • {cname}" + (f": {strengths}" if strengths else ""))
+            if strengths:
+                all_strengths.append(f"{cname}: {strengths}")
 
-    return f"""
-LESSON TO GENERATE:
-Lesson ID: {lesson['lesson_id']}
-Title: {lesson['title']}
+    if weak_lines:
+        lines.append(
+            "WEAK AREAS (re-explain with fresh examples; design activities that target these):\n"
+            + "\n".join(weak_lines)
+        )
+    if strong_lines:
+        lines.append(
+            "STRONG AREAS (acknowledge briefly; push to deeper applications):\n"
+            + "\n".join(strong_lines)
+        )
 
-CONCEPTS COVERED:
-{concepts_text}
-
-LEARNER PROFILE:
-Name: {persona['name']}
-Major: {persona['major']}
-Familiarity with topic: {persona['familiarity']}
-Learning style: {persona['learning_style']}
-Hours available per week: {persona['hours_per_week']}
-Interests: {json.dumps(persona.get('interests', []), ensure_ascii=False)}
-Learning goals: {json.dumps(persona.get('learning_goals', {}), ensure_ascii=False)}
-Additional notes: {persona['notes']}
-
-SOURCE MATERIAL (raw lecture chunks):
-{chunks_text}
-
-AVAILABLE YOUTUBE VIDEOS:
-{videos_text}
-
-Personalization requirement:
-- Keep tutor narration in the learner's language preference (if specified elsewhere), but make
-  examples, scenarios, and analogies explicitly relevant to the learner's interests/goals above.
-
-Generate a personalized lesson following the output schema exactly.
-""".strip()
-
-
-def _parse_json(raw: str) -> dict[str, Any]:
-    raw = raw.strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
-
-    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-
-    raise ValueError(f"Could not parse JSON from model response: {raw[:200]}")
+    synthetic_record = {
+        "score": round(avg_score, 1),
+        "ease_factor": round(min_ease, 4),
+        "repetitions": max_reps,
+        "last_gaps": "; ".join(all_gaps),
+        "last_strengths": "; ".join(all_strengths),
+    }
+    return synthetic_record, "\n".join(lines)
 
 
 def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | None = None) -> dict[str, Any]:
     """
-    Same inputs as generate_lesson: roadmap lesson, Pinecone chunks, YouTube search.
-    Used by the interactive / dynamic lesson loop without generating the full lesson JSON.
+    Load all sources needed for an interactive lesson session: persona, roadmap lesson,
+    Pinecone chunks, YouTube videos, and SRS context. Used by dynamic_lesson.py.
     """
     persona = _load_persona_from_supabase(persona_id, course_override=course_override)
     course = course_override or persona.get("course", "accounting")
-    lesson = _get_lesson_from_cache(lesson_id, course)
+    student_id = persona.get("student_id", "")
+
+    # Prefer the student's Supabase roadmap (built by build_course_lesson_roadmap)
+    # since that is the authoritative source the roadmap page uses.
+    lesson = None
+    if student_id:
+        try:
+            supabase = get_supabase_client()
+            resp = supabase.table("roadmap_cache").select("roadmap").eq("student_id", student_id).limit(1).execute()
+            rows = resp.data or []
+            if rows:
+                roadmap = rows[0].get("roadmap")
+                if isinstance(roadmap, str):
+                    roadmap = json.loads(roadmap)
+                if isinstance(roadmap, dict):
+                    for l in roadmap.get("lessons", []):
+                        if l.get("lesson_id") == lesson_id:
+                            lesson = l
+                            break
+        except Exception as exc:
+            print(f"[lesson_generator] Supabase roadmap lookup failed: {exc}")
+
+    if lesson is None:
+        raise ValueError(
+            f"Lesson '{lesson_id}' not found in roadmap for student '{student_id}'. "
+            "Rebuild the roadmap first via POST /roadmap/{student_id}/rebuild."
+        )
+
+    srs_record: dict[str, Any] | None = None
+    srs_context = ""
+    if student_id:
+        try:
+            concept_ids = [str(c.get("id") or "") for c in lesson.get("concepts") or [] if c.get("id")]
+            name_map = {str(c.get("id") or ""): str(c.get("name") or "") for c in lesson.get("concepts") or []}
+            if concept_ids:
+                supabase_srs = get_supabase_client()
+                resp = (
+                    supabase_srs.table("srs_records")
+                    .select("*")
+                    .eq("student_id", student_id)
+                    .in_("concept_id", concept_ids)
+                    .execute()
+                )
+                concept_records = [r for r in (resp.data or []) if r.get("repetitions")]
+                if concept_records:
+                    srs_record, srs_context = _build_composite_srs_context(concept_records, name_map)
+        except Exception as exc:
+            print(f"[lesson_generator] SRS lookup skipped: {exc}")
 
     chunk_ids = lesson.get("chunk_ids", [])
     if chunk_ids:
@@ -471,20 +469,26 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
             "namespaces_tried": [],
         }
 
-    search_query = f"{lesson['title']} {' '.join(c['name'] for c in lesson.get('concepts', [])[:3])}"
+    _sq_parts = f"{lesson['title']} {' '.join(c['name'] for c in lesson.get('concepts', [])[:3])}"
+    search_query = " ".join(_sq_parts.split()[:10])
     video_search_error: str | None = None
-    try:
-        videos = search_videos(search_query, max_results=3)
-    except Exception as e:
-        print(f"[lesson_generator] YouTube search failed: {e}")
-        videos = []
-        video_search_error = str(e)
+    videos = []
+    if "videos" in persona.get("preferred_formats", []):
+        try:
+            videos = search_videos(search_query, max_results=3)
+        except Exception as e:
+            print(f"[lesson_generator] YouTube search failed: {e}")
+            videos = []
+            video_search_error = str(e)
 
-    if not videos and not video_search_error:
-        if not os.getenv("YOUTUBE_API_KEY", "").strip():
-            video_search_error = (
-                "YOUTUBE_API_KEY is not set. Add it to backend/.env and restart the API server."
-            )
+        if not videos and not video_search_error:
+            if not os.getenv("YOUTUBE_API_KEY", "").strip():
+                video_search_error = (
+                    "YOUTUBE_API_KEY is not set. Add it to backend/.env and restart the API server."
+                )
+    else:
+        # Do not treat the absence of a video preference as an error.
+        video_search_error = None
 
     return {
         "lesson": lesson,
@@ -495,30 +499,8 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
         "chunks_meta": chunks_meta,
         "videos": videos,
         "video_search_error": video_search_error,
+        "srs_record": srs_record,
+        "srs_context": srs_context,
     }
 
 
-def generate_lesson(lesson_id: str, persona_id: str, course_override: str | None = None) -> dict[str, Any]:
-    bundle = load_lesson_sources(lesson_id, persona_id, course_override)
-    lesson = bundle["lesson"]
-    chunks = bundle["chunks"]
-    persona = bundle["persona"]
-    videos = bundle["videos"]
-
-    prompt = _build_prompt(lesson, chunks, persona, videos)
-
-    client = create_bedrock_runtime_client(region=AWS_REGION)
-    response = client.converse(
-        modelId=BEDROCK_MODEL_ID,
-        system=[{"text": SYSTEM_PROMPT}],
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": 4096, "temperature": 0.3},
-    )
-
-    raw_text = "".join(
-        block["text"]
-        for block in response["output"]["message"]["content"]
-        if "text" in block
-    ).strip()
-
-    return _parse_json(raw_text)
