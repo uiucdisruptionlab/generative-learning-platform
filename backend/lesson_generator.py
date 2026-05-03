@@ -76,6 +76,7 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
         "notes": str(llm_profile.get("notes") or ""),
         "interests": [str(x) for x in interests if str(x).strip()],
         "learning_goals": goals,
+        "preferred_formats": [str(x) for x in preferred_formats if str(x).strip()],
     }
 
 
@@ -471,18 +472,23 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     _sq_parts = f"{lesson['title']} {' '.join(c['name'] for c in lesson.get('concepts', [])[:3])}"
     search_query = " ".join(_sq_parts.split()[:10])
     video_search_error: str | None = None
-    try:
-        videos = search_videos(search_query, max_results=3)
-    except Exception as e:
-        print(f"[lesson_generator] YouTube search failed: {e}")
-        videos = []
-        video_search_error = str(e)
+    videos = []
+    if "videos" in persona.get("preferred_formats", []):
+        try:
+            videos = search_videos(search_query, max_results=3)
+        except Exception as e:
+            print(f"[lesson_generator] YouTube search failed: {e}")
+            videos = []
+            video_search_error = str(e)
 
-    if not videos and not video_search_error:
-        if not os.getenv("YOUTUBE_API_KEY", "").strip():
-            video_search_error = (
-                "YOUTUBE_API_KEY is not set. Add it to backend/.env and restart the API server."
-            )
+        if not videos and not video_search_error:
+            if not os.getenv("YOUTUBE_API_KEY", "").strip():
+                video_search_error = (
+                    "YOUTUBE_API_KEY is not set. Add it to backend/.env and restart the API server."
+                )
+    else:
+        # Do not treat the absence of a video preference as an error.
+        video_search_error = None
 
     return {
         "lesson": lesson,
