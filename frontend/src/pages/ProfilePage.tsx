@@ -46,6 +46,21 @@ function learningGoalsToDisplayList(
   return out;
 }
 
+function humanizeLessonId(lessonId: string): string {
+  const id = lessonId.trim();
+  const m = id.match(/^lesson_0*(\d+)$/i);
+  if (m) return `Lesson ${Number(m[1])}`;
+  return titleCaseSnake(id.replace(/-/g, '_'));
+}
+
+function joinNatural(items: string[]): string {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
+/** roadmap_progress: completed_lessons + current_lesson_id (backend sets both to the lesson just finished). */
 function formatRoadmapProgress(progress: unknown): string {
   if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return '';
   const lines: string[] = [];
@@ -53,16 +68,32 @@ function formatRoadmapProgress(progress: unknown): string {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const cp = raw as Record<string, unknown>;
     const completed = Array.isArray(cp.completed_lessons)
-      ? (cp.completed_lessons as string[])
+      ? (cp.completed_lessons as string[]).map((x) => String(x).trim()).filter(Boolean)
       : [];
-    const current = cp.current_lesson_id != null ? String(cp.current_lesson_id) : '—';
+    const currentRaw = cp.current_lesson_id != null ? String(cp.current_lesson_id).trim() : '';
     const courseLabel = titleCaseSnake(courseId.replace(/-/g, '_'));
+    const labels = completed.map(humanizeLessonId);
     const n = completed.length;
-    const summary =
-      n === 0
-        ? `Starting out · next up: ${current}`
-        : `${n} lesson${n === 1 ? '' : 's'} done (${completed.join(', ')}) · current: ${current}`;
-    lines.push(`${courseLabel}: ${summary}`);
+
+    if (n === 0) {
+      lines.push(
+        currentRaw
+          ? `${courseLabel}: Not started yet — open ${humanizeLessonId(currentRaw)} when you're ready.`
+          : `${courseLabel}: No lessons completed yet.`,
+      );
+      continue;
+    }
+
+    const donePhrase = `${n} lesson${n === 1 ? '' : 's'} completed: ${joinNatural(labels)}.`;
+
+    // current_lesson_id is the last lesson touched (and is always in completed_lessons); don’t echo it twice.
+    if (currentRaw && !completed.includes(currentRaw)) {
+      lines.push(
+        `${courseLabel}: ${donePhrase} Continue with ${humanizeLessonId(currentRaw)}.`,
+      );
+    } else {
+      lines.push(`${courseLabel}: ${donePhrase}`);
+    }
   }
   return lines.join('\n\n');
 }
