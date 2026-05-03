@@ -317,36 +317,6 @@ def _process_llm_response(
 # Routes
 # ---------------------------------------------------------------------------
 
-ROADMAP_CACHE_DIR = Path(__file__).parent
-
-COURSE_KEY_MAP: dict[str, str] = {
-    "ALecFinal": "accounting",
-    "accounting": "accounting",
-    "python": "python",
-    "financing": "financing",
-}
-
-
-def _course_cache_path(course: str) -> Path:
-    key = COURSE_KEY_MAP.get(course, course)
-    return ROADMAP_CACHE_DIR / f"roadmap_cache_{key}.json"
-
-
-def _load_roadmap_cache(course: str) -> dict | None:
-    path = _course_cache_path(course)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return None
-
-
-def _save_roadmap_cache(course: str, data: dict) -> None:
-    _course_cache_path(course).write_text(json.dumps(
-        data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
 # ---------------------------------------------------------------------------
 # Lesson roadmap cache (lecture-grouped + LLM-refined). Stored in the existing
 # Supabase `roadmap_cache` table, keyed by student_id (one course per student
@@ -422,65 +392,6 @@ def _get_or_build_lesson_roadmap(
     if fresh.get("lessons"):
         _save_lesson_roadmap_cache(student_id, fresh)
     return fresh
-
-
-
-
-def _node_ids_from_cached_roadmap(course: str) -> list[str] | None:
-    cached = _load_roadmap_cache(course)
-    if not cached:
-        return None
-    lessons = cached.get("lessons") or []
-    if not isinstance(lessons, list):
-        return None
-    node_ids = [
-        str(lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
-        for lesson in lessons
-        if isinstance(lesson, dict) and (lesson.get("lesson_id") or lesson.get("id") or lesson.get("title"))
-    ]
-    return node_ids or None
-
-
-def _build_and_cache(course: str, lecture_id: str | None) -> dict:
-    from graphdb.roadmap_builder import build_roadmap, build_roadmap_for_lecture
-    if lecture_id:
-        data = build_roadmap_for_lecture(
-            lecture_id, course=course, refine_with_llm=True)
-    else:
-        data = build_roadmap(course=course, refine_with_llm=True)
-    _save_roadmap_cache(course, data)
-    return data
-
-
-@app.get("/roadmap")
-def get_roadmap(
-    course: str = Query(default="accounting"),
-    lecture_id: str | None = Query(default=None),
-):
-    cached = _load_roadmap_cache(course)
-    if cached:
-        return cached
-    try:
-        return _build_and_cache(course, lecture_id)
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/roadmap/rebuild")
-def rebuild_roadmap(
-    course: str = Query(default="accounting"),
-    lecture_id: str | None = Query(default=None),
-):
-    try:
-        return _build_and_cache(course, lecture_id)
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 LESSON_CACHE_DIR = Path(__file__).parent / "lesson_cache"
 
 
@@ -510,23 +421,6 @@ def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | No
     from lesson_generator import generate_lesson
     data = generate_lesson(lesson_id=lesson_id,
                            persona_id=persona_id, course_override=course)
-    source_course = course
-    if not source_course:
-        try:
-            from lesson_generator import _load_persona_from_supabase
-            source_course = _load_persona_from_supabase(persona_id, course_override=None).get("course")
-        except Exception:
-            source_course = None
-    if source_course:
-        roadmap = _load_roadmap_cache(source_course) or {}
-        for lesson in roadmap.get("lessons", []):
-            if lesson.get("lesson_id") == lesson_id:
-                data.setdefault("concepts", lesson.get("concepts", []))
-                data.setdefault("chunk_ids", lesson.get("chunk_ids", []))
-                data.setdefault("lecture_ids", lesson.get("lecture_ids", []))
-                data.setdefault("prerequisites",
-                                lesson.get("prerequisites", []))
-                break
     _save_lesson_cache(persona_id, lesson_id, data, course)
     return data
 
@@ -646,13 +540,6 @@ def _lesson_context_for_scoring(lesson_id: str, persona: str, course: str | None
         persona, lesson_id, course) or _load_lesson_cache(persona, lesson_id)
     if cached:
         return cached
-
-    if course:
-        roadmap = _load_roadmap_cache(course) or {}
-        for lesson in roadmap.get("lessons", []):
-            if lesson.get("lesson_id") == lesson_id:
-                return lesson
-
     return {"lesson_id": lesson_id}
 
 
