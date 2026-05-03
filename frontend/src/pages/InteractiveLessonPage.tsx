@@ -6,7 +6,6 @@ import {
   startInteractiveLesson,
   continueInteractiveSession,
   tickInteractiveLesson,
-  scoreLesson,
   type InteractiveSessionState,
   type InteractiveTranscriptEntry,
   type PendingWidget,
@@ -643,16 +642,6 @@ export default function InteractiveLessonPage() {
     [state?.session_id],
   )
 
-  const fireScore = useCallback(
-    (response: string, question?: string, referenceAnswer?: string, explicitScore?: number) => {
-      if (!lessonId) return
-      scoreLesson({ lessonId, persona, response, question, referenceAnswer, explicitScore }).catch(() => {
-        // fire-and-forget — don't surface scoring errors in the lesson UX
-      })
-    },
-    [lessonId, persona],
-  )
-
   const handleRestart = useCallback(async () => {
     if (!lessonId) return
     setLoading(true)
@@ -745,6 +734,18 @@ export default function InteractiveLessonPage() {
           </div>
         ) : state ? (
           <div className="space-y-8">
+            {state.session_type === 'review' && (state.review_count ?? 0) > 0 && (
+              <div className="rounded-xl border-2 border-indigo-200/70 dark:border-indigo-800/50 bg-indigo-50/50 dark:bg-indigo-950/30 px-5 py-4 flex items-start gap-3">
+                <span className="material-symbols-outlined text-indigo-500 dark:text-indigo-400 text-xl mt-0.5 flex-shrink-0">refresh</span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Clearing spaced-repetition reviews first</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                    You have {state.review_count} concept{(state.review_count ?? 0) > 1 ? 's' : ''} due for review. Complete these before the lesson starts.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {state.video_status?.source === 'lesson_cache' && state.video_status.detail && (
               <div className="rounded-xl border border-amber-200/80 dark:border-amber-800/50 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
                 <span className="material-symbols-outlined align-middle text-base mr-1">info</span>
@@ -833,14 +834,7 @@ export default function InteractiveLessonPage() {
                     key={pending.payload.question}
                     payload={pending.payload}
                     disabled={busy}
-                    onSubmit={(widget_result) => {
-                      fireScore(
-                        String(widget_result.selected_option ?? ''),
-                        pending.payload.question,
-                        String(widget_result.correct_option ?? ''),
-                      )
-                      runTick({ widget_result })
-                    }}
+                    onSubmit={(widget_result) => runTick({ widget_result })}
                   />
                 )}
                 {pending.type === 'flashcards' && (
@@ -855,14 +849,7 @@ export default function InteractiveLessonPage() {
                   <FreeResponseWidget
                     payload={pending.payload}
                     disabled={busy}
-                    onSubmit={(widget_result) => {
-                      if (widget_result.dont_know) {
-                        fireScore('', pending.payload.question, undefined, 0)
-                      } else {
-                        fireScore(String(widget_result.text ?? ''), pending.payload.question)
-                      }
-                      runTick({ widget_result })
-                    }}
+                    onSubmit={(widget_result) => runTick({ widget_result })}
                   />
                 )}
                 {pending.type === 'video' && (
@@ -939,32 +926,77 @@ export default function InteractiveLessonPage() {
               </section>
             )}
 
-            {state.awaiting === 'none' && (
+            {state.awaiting === 'none' && state.session_type !== 'gated' && (
               <section className="rounded-2xl border-2 border-primary/25 bg-primary/5 dark:bg-primary/10 px-6 py-6 space-y-4">
+                {state.session_type === 'review' ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary text-2xl">task_alt</span>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Reviews cleared!</h3>
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      Your spaced-repetition reviews are up to date. Ready to continue with today's lesson?
+                    </p>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleRestart}
+                      className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-light transition-colors disabled:opacity-40"
+                    >
+                      <span className="material-symbols-outlined text-base">arrow_forward</span>
+                      Continue to lesson
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary text-2xl">task_alt</span>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Lesson complete</h3>
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      Your responses have been saved to your SRS record. The spaced-repetition algorithm will schedule any weak concepts for review in future sessions.
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={handleRestart}
+                        className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-light transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-base">replay</span>
+                        Repeat this lesson
+                      </button>
+                      <Link
+                        to="/roadmap"
+                        className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-primary/60 hover:text-primary transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-base">arrow_back</span>
+                        Back to roadmap
+                      </Link>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
+            {state.session_type === 'gated' && state.gated_info && (
+              <section className="rounded-2xl border-2 border-amber-300/70 dark:border-amber-700/50 bg-amber-50/60 dark:bg-amber-950/30 px-6 py-6 space-y-4">
                 <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary text-2xl">task_alt</span>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Lesson complete</h3>
+                  <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-2xl">lock</span>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white font-display">Lesson locked</h3>
                 </div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Your responses have been scored and saved to your SRS record. Repeat the lesson to practice again — the spaced-repetition algorithm will adjust difficulty based on your last score.
+                <p className="text-sm text-slate-700 dark:text-slate-300">
+                  Your average score on the previous lesson was{' '}
+                  <span className="font-semibold">{state.gated_info.avg_score.toFixed(1)}/5</span>, which is below the
+                  threshold of <span className="font-semibold">{state.gated_info.threshold}/5</span> needed to move on.
+                  Go back and repeat the previous lesson until you reach that threshold.
                 </p>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={handleRestart}
-                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-light transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-base">replay</span>
-                    Repeat this lesson
-                  </button>
-                  <Link
-                    to="/roadmap"
-                    className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:border-primary/60 hover:text-primary transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-base">arrow_back</span>
-                    Back to roadmap
-                  </Link>
-                </div>
+                <Link
+                  to="/roadmap"
+                  className="inline-flex items-center gap-2 rounded-xl border-2 border-amber-400 dark:border-amber-600 bg-white dark:bg-slate-900 px-5 py-2.5 text-sm font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/50 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">arrow_back</span>
+                  Back to roadmap
+                </Link>
               </section>
             )}
 

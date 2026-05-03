@@ -156,6 +156,7 @@ def upsert_srs_record(
     concept_id: str | None = None,
     node_id: str | None = None,
     course: str | None,
+    lesson_id: str | None = None,
     score: int | float,
     metadata: dict[str, Any] | None,
     client: Client,
@@ -184,6 +185,8 @@ def upsert_srs_record(
         "repetitions": schedule["repetitions"],
         "next_review_at": schedule["next_review_at"],
     }
+    if lesson_id:
+        row["lesson_id"] = lesson_id
     # Columns added via migration — included in primary attempt, dropped in fallback if schema is older.
     extended: dict[str, Any] = {
         "last_reviewed_at": reviewed_at,

@@ -30,6 +30,13 @@ COURSE_SOURCE_PREFIXES = {
     "dl": ("DL_", "DLlec", "DL_lec"),
 }
 
+# Maps semantic course names (used in Supabase student_courses.course_id) to the
+# corresponding Neo4j Course node IDs (ingestion artifacts that differ from the
+# semantic name).
+COURSE_NEO4J_IDS: dict[str, str] = {
+    "accounting": "ALecFinal",
+}
+
 LATE_TOPIC_KEYWORDS = {
     "final",
     "review",
@@ -765,7 +772,8 @@ def build_course_lesson_roadmap(
     """
     from graphdb.neo4j_client import get_lecture_grouped_concepts
 
-    lectures = get_lecture_grouped_concepts(course_id)
+    neo4j_course_id = COURSE_NEO4J_IDS.get(course_id, course_id)
+    lectures = get_lecture_grouped_concepts(neo4j_course_id)
     if not lectures:
         return {"course_id": course_id, "lesson_count": 0, "lessons": [], "node_ids": []}
 

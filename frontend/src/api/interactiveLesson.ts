@@ -62,8 +62,16 @@ export type ChunksStatus = {
   namespaces_tried?: string[]
 }
 
+export type GatedInfo = {
+  blocked: boolean
+  blocking_lesson_id: string
+  avg_score: number
+  threshold: number
+}
+
 export type InteractiveSessionState = {
   session_id: string
+  session_type?: 'lesson' | 'review' | 'gated'
   stage: string
   lesson_title: string
   concepts: { name: string; description?: string }[]
@@ -74,6 +82,8 @@ export type InteractiveSessionState = {
   pending_widget: PendingWidget | null
   awaiting: InteractiveAwaiting
   model_id: string
+  gated_info?: GatedInfo | null
+  review_count?: number | null
 }
 
 export type InteractiveTickParams = {
@@ -128,24 +138,6 @@ export async function tickInteractiveLesson(params: InteractiveTickParams): Prom
     message: params.message,
     action: params.action,
     widget_result: params.widget_result,
-  })
-}
-
-export async function scoreLesson(params: {
-  lessonId: string
-  persona: string
-  response: string
-  question?: string
-  referenceAnswer?: string
-  explicitScore?: number
-}): Promise<void> {
-  await postJson<unknown>('/lesson/score', {
-    lesson_id: params.lessonId,
-    persona: params.persona,
-    response: params.response,
-    question: params.question ?? null,
-    reference_answer: params.referenceAnswer ?? null,
-    explicit_score: params.explicitScore ?? null,
   })
 }
 
