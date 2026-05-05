@@ -80,9 +80,9 @@ function McqWidget({
               onClick={() => setIdx(i)}
               className={`w-full text-left px-4 py-3 rounded-xl border-2 text-sm transition-all ${
                 show && isCorrect
-                  ? 'border-primary bg-storm-300/55 dark:bg-storm-700/25'
+                  ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-500/70 dark:bg-emerald-950/30'
                   : show && selected && !isCorrect
-                  ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
+                  ? 'border-red-400 bg-red-50 dark:border-red-500/70 dark:bg-red-950/25'
                   : selected
                   ? 'border-primary bg-primary/5'
                   : 'border-slate-200 dark:border-slate-700 hover:border-primary/40'
