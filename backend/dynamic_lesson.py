@@ -87,6 +87,242 @@ def _wants_videos(persona: dict[str, Any]) -> bool:
         for item in (persona.get("preferred_formats") or [])
     )
 
+
+_FORMAT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "videos": ("video", "videos", "youtube", "clip", "clips", "watching"),
+    "flashcards": ("flashcard", "flashcards", "flash card", "flash cards", "cards"),
+    "reading": ("reading", "readings", "text", "article", "articles"),
+    "MCQs": ("mcq", "mcqs", "multiple choice", "quiz question", "quiz questions"),
+    "worked examples": ("worked example", "worked examples"),
+    "practice questions": ("practice question", "practice questions", "practice problems", "problems"),
+    "AI interaction": ("ai interaction", "chat", "conversation", "talking it through"),
+}
+
+_NEGATIVE_PREF_RE = re.compile(
+    r"\b("
+    r"don'?t|do not|doesn'?t|does not|not|no|never|stop|avoid|remove|disable|"
+    r"hate|dislike|isn'?t|is not|aren'?t|are not|doesn'?t work|not working|isn'?t working"
+    r")\b",
+    re.IGNORECASE,
+)
+_POSITIVE_PREF_RE = re.compile(
+    r"\b("
+    r"like|prefer|want|use|include|add|more|love|helpful|works|working|rather|instead"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _format_from_text(text: str) -> set[str]:
+    lowered = text.lower()
+    matched: set[str] = set()
+    for canonical, keywords in _FORMAT_KEYWORDS.items():
+        if any(keyword in lowered for keyword in keywords):
+            matched.add(canonical)
+    return matched
+
+
+def _infer_profile_format_updates(text: str) -> dict[str, set[str]]:
+    add: set[str] = set()
+    remove: set[str] = set()
+    rather_match = re.search(r"\brather\b(?P<before>.+?)\bthan\b(?P<after>.+)$", text, flags=re.IGNORECASE)
+    if rather_match:
+        add.update(_format_from_text(rather_match.group("before")))
+        remove.update(_format_from_text(rather_match.group("after")))
+        text = text[: rather_match.start()]
+
+    replacement_match = re.search(r"\b(instead of|rather than)\b(.+)$", text, flags=re.IGNORECASE)
+    if replacement_match:
+        remove.update(_format_from_text(replacement_match.group(2)))
+        text = text[: replacement_match.start()]
+
+    clauses = re.split(r"[,.;!?]|\bbut\b|\band\b", text, flags=re.IGNORECASE)
+
+    for clause in clauses:
+        formats = _format_from_text(clause)
+        if not formats:
+            continue
+        if re.search(r"\b(don'?t|do not)\s+understand\b", clause, flags=re.IGNORECASE):
+            continue
+        if _NEGATIVE_PREF_RE.search(clause):
+            remove.update(formats)
+        elif _POSITIVE_PREF_RE.search(clause):
+            add.update(formats)
+
+    add -= remove
+    return {"add": add, "remove": remove}
+
+
+def _preferred_formats_after_update(
+    current_formats: list[Any],
+    *,
+    add: set[str],
+    remove: set[str],
+) -> list[str]:
+    remove_keywords = tuple(
+        keyword
+        for canonical in remove
+        for keyword in _FORMAT_KEYWORDS.get(canonical, (canonical,))
+    )
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in current_formats:
+        text = str(raw).strip()
+        lowered = text.lower()
+        if not text:
+            continue
+        if remove_keywords and any(keyword in lowered for keyword in remove_keywords):
+            continue
+        if lowered not in seen:
+            cleaned.append(text)
+            seen.add(lowered)
+
+    for fmt in add:
+        key = fmt.lower()
+        if key not in seen:
+            cleaned.append(fmt)
+            seen.add(key)
+    return cleaned
+
+
+def _clear_lesson_cache_for_persona(student_id: str, persona: dict[str, Any]) -> None:
+    if not _LESSON_CACHE_DIR.exists():
+        return
+    keys = {student_id.lower()}
+    persona_id = str(persona.get("id") or persona.get("student_id") or "").strip().lower()
+    name = str(persona.get("name") or "").strip().lower()
+    if persona_id:
+        keys.add(persona_id)
+    if name:
+        keys.add(name)
+    for child in _LESSON_CACHE_DIR.iterdir():
+        if not child.is_dir():
+            continue
+        folder = child.name.lower()
+        if not any(folder == key or folder.startswith(f"{key}_") for key in keys if key):
+            continue
+        for cache_file in child.glob("*.json"):
+            try:
+                cache_file.unlink()
+            except OSError as exc:
+                print(f"[dynamic_lesson] failed to remove stale lesson cache {cache_file}: {exc}")
+
+
+def _learning_style_from_formats(formats: list[str], confidence: str | None) -> str:
+    if not formats:
+        return "Prefers guided explanations and targeted practice questions."
+    if len(formats) == 1:
+        format_phrase = formats[0]
+    else:
+        format_phrase = f"{', '.join(formats[:-1])} and {formats[-1]}"
+    confidence_text = str(confidence or "").strip()
+    suffix = f"; current confidence is {confidence_text}" if confidence_text else ""
+    return f"Prefers learning through {format_phrase}{suffix}."
+
+
+def _activity_types_for_formats(formats: set[str]) -> set[str]:
+    out: set[str] = set()
+    if "videos" in formats:
+        out.add("video")
+    if "flashcards" in formats:
+        out.add("flashcards")
+    if "MCQs" in formats:
+        out.add("mcq")
+    if "practice questions" in formats or "worked examples" in formats:
+        out.add("free_response")
+    return out
+
+
+def _apply_profile_updates_from_message(session: dict[str, Any], text: str) -> dict[str, Any] | None:
+    updates = _infer_profile_format_updates(text)
+    add = updates["add"]
+    remove = updates["remove"]
+    if not add and not remove:
+        return None
+
+    persona = session["sources"].get("persona") or {}
+    student_id = str(persona.get("student_id") or "").strip()
+    current_formats = persona.get("preferred_formats") or []
+    if not isinstance(current_formats, list):
+        current_formats = [current_formats]
+
+    next_formats = _preferred_formats_after_update(current_formats, add=add, remove=remove)
+    if [str(x) for x in current_formats] == next_formats:
+        return None
+
+    confidence = str(persona.get("familiarity") or "").strip()
+    next_style = _learning_style_from_formats(next_formats, confidence)
+
+    if student_id:
+        try:
+            from supabase_local import get_student_profile, get_supabase_client
+
+            supabase = get_supabase_client()
+            current_profile = get_student_profile(student_id, client=supabase) or {}
+            llm_profile = current_profile.get("llm_profile")
+            if not isinstance(llm_profile, dict):
+                llm_profile = {}
+            llm_profile = {**llm_profile, "learning_style_summary": next_style}
+            supabase.table("students").update(
+                {
+                    "preferred_formats": next_formats,
+                    "llm_profile": llm_profile,
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            ).eq("id", student_id).execute()
+            _clear_lesson_cache_for_persona(student_id, {**persona, **current_profile})
+        except Exception as exc:
+            print(f"[dynamic_lesson] profile preference update failed: {exc}")
+            return None
+
+    persona["preferred_formats"] = next_formats
+    persona["learning_style"] = next_style
+    session["sources"]["persona"] = persona
+
+    if "videos" in remove:
+        session["sources"]["videos"] = []
+        session["video_status"] = {
+            "source": "none",
+            "detail": "Videos were turned off after your learner-profile update.",
+        }
+
+    summary_bits: list[str] = []
+    if remove:
+        summary_bits.append("removed " + ", ".join(sorted(remove)))
+    if add:
+        summary_bits.append("added " + ", ".join(sorted(add)))
+    return {
+        "preferred_formats": next_formats,
+        "added_formats": sorted(add),
+        "removed_formats": sorted(remove),
+        "removed_activity_types": _activity_types_for_formats(remove),
+        "message": "Got it - I updated your learner profile and will keep that preference in mind for this lesson: "
+        + "; ".join(summary_bits)
+        + ".",
+    }
+
+
+def _handle_profile_update_turn(session: dict[str, Any], text: str) -> bool:
+    profile_update = _apply_profile_updates_from_message(session, text)
+    if not profile_update:
+        return False
+    _append_user(session, text)
+    _append_assistant(
+        session,
+        str(profile_update["message"]),
+        meta={
+            "kind": "profile_update",
+            "preferred_formats": profile_update["preferred_formats"],
+            "added_formats": profile_update["added_formats"],
+            "removed_formats": profile_update["removed_formats"],
+        },
+    )
+    pending = session.get("pending_widget")
+    removed_activity_types = profile_update.get("removed_activity_types") or set()
+    if isinstance(pending, dict) and pending.get("type") in removed_activity_types:
+        session["pending_widget"] = None
+    return True
+
 STEP_TYPES: list[tuple[str, str]] = [
     ("concept", "Introduce core definitions and intuition. Stay grounded in the source material."),
     ("example", "Work a concrete example tied to the excerpts. No invented course policies."),
@@ -1399,6 +1635,9 @@ def tick_session(
         session["pending_widget"] = None
         session["cursor"] = _stage_index("complete")
         _maybe_save_session(session)
+        return _response(session)
+
+    if text_msg and _handle_profile_update_turn(session, text_msg):
         return _response(session)
 
     # Optional widget was skipped by the model — don't block the learner on an empty slot.
