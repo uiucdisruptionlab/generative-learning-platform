@@ -80,6 +80,14 @@ def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: s
     }
 
 
+def _wants_videos(persona: dict[str, Any]) -> bool:
+    return any(
+        "video" in str(item).strip().lower()
+        or "youtube" in str(item).strip().lower()
+        for item in (persona.get("preferred_formats") or [])
+    )
+
+
 def resolve_student_id(persona_id: str) -> str:
     return _resolve_student_id(persona_id)
 
@@ -358,6 +366,71 @@ def _build_composite_srs_context(
     return synthetic_record, "\n".join(lines)
 
 
+def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict], srs_context: str = "") -> str:
+    concepts_text = "\n".join(
+        f"- {c['name']}: {c.get('description', '')}" for c in lesson.get("concepts", [])
+    )
+    chunks_text = (
+        "\n\n---\n\n".join(chunks)
+        if chunks
+        else "[No lecture excerpts loaded — use CONCEPTS only. Do not tell the learner to install software.]"
+    )
+    videos_text = json.dumps(videos, indent=2) if videos else "[]"
+
+    srs_section = f"\n\n{srs_context}" if srs_context else ""
+
+    return f"""
+LESSON TO GENERATE:
+Lesson ID: {lesson['lesson_id']}
+Title: {lesson['title']}
+
+CONCEPTS COVERED:
+{concepts_text}
+
+LEARNER PROFILE:
+Name: {persona['name']}
+Major: {persona['major']}
+Familiarity with topic: {persona['familiarity']}
+Learning style: {persona['learning_style']}
+Hours available per week: {persona['hours_per_week']}
+Preferred formats: {json.dumps(persona.get('preferred_formats', []), ensure_ascii=False)}
+Interests: {json.dumps(persona.get('interests', []), ensure_ascii=False)}
+Learning goals: {json.dumps(persona.get('learning_goals', {}), ensure_ascii=False)}
+Additional notes: {persona['notes']}{srs_section}
+
+SOURCE MATERIAL (raw lecture chunks):
+{chunks_text}
+
+AVAILABLE YOUTUBE VIDEOS:
+{videos_text}
+
+Personalization requirement:
+- Keep tutor narration in the learner's language preference (if specified elsewhere), but make
+  examples, scenarios, and analogies explicitly relevant to the learner's interests/goals above.
+- Respect Preferred formats when choosing activities and supporting media. Avoid formats the learner
+  removed from their profile unless they explicitly ask for them later.
+
+Generate a personalized lesson following the output schema exactly.
+""".strip()
+
+
+def _parse_json(raw: str) -> dict[str, Any]:
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Could not parse JSON from model response: {raw[:200]}")
+
+
 def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | None = None) -> dict[str, Any]:
     """
     Load all sources needed for an interactive lesson session: persona, roadmap lesson,
@@ -489,7 +562,7 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     search_query = " ".join(_sq_parts.split()[:10])
     video_search_error: str | None = None
     videos = []
-    if "videos" in persona.get("preferred_formats", []):
+    if _wants_videos(persona):
         try:
             videos = search_videos(search_query, max_results=3)
         except Exception as e:
@@ -520,3 +593,28 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
     }
 
 
+def generate_lesson(lesson_id: str, persona_id: str, course_override: str | None = None) -> dict[str, Any]:
+    bundle = load_lesson_sources(lesson_id, persona_id, course_override)
+    lesson = bundle["lesson"]
+    chunks = bundle["chunks"]
+    persona = bundle["persona"]
+    videos = bundle["videos"]
+    srs_context = bundle.get("srs_context", "")
+
+    prompt = _build_prompt(lesson, chunks, persona, videos, srs_context)
+
+    client = create_bedrock_runtime_client(region=AWS_REGION)
+    response = client.converse(
+        modelId=BEDROCK_MODEL_ID,
+        system=[{"text": SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={"maxTokens": 4096, "temperature": 0.3},
+    )
+
+    raw_text = "".join(
+        block["text"]
+        for block in response["output"]["message"]["content"]
+        if "text" in block
+    ).strip()
+
+    return _parse_json(raw_text)

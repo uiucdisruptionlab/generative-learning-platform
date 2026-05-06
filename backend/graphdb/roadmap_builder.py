@@ -719,6 +719,7 @@ def _attach_concept_ids(
     refined_lessons: list[dict[str, Any]],
     name_to_id: dict[str, str],
     name_to_description: dict[str, str],
+    concept_order: dict[str, tuple[int, int, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Re-attach Neo4j concept IDs to LLM-refined lessons by name.
 
@@ -745,6 +746,13 @@ def _attach_concept_ids(
             })
         if not lesson_concepts:
             continue
+        if concept_order:
+            lesson_concepts.sort(
+                key=lambda c: concept_order.get(
+                    str(c.get("id") or ""),
+                    (10**9, 10**9, str(c.get("name") or "").lower()),
+                )
+            )
         attached.append({
             "lesson_id": str(lesson.get("lesson_id") or f"lesson_{i + 1:03d}"),
             "title": str(lesson.get("title") or "").strip() or f"Lesson {i + 1}",
@@ -779,14 +787,25 @@ def build_course_lesson_roadmap(
 
     name_to_id: dict[str, str] = {}
     name_to_description: dict[str, str] = {}
-    for lec in lectures:
+    concept_order: dict[str, tuple[int, int, str]] = {}
+    for lecture_index, lec in enumerate(lectures):
         for c in lec.get("concepts", []) or []:
             key = str(c.get("name") or "").strip().lower()
             if not key:
                 continue
-            name_to_id.setdefault(key, str(c.get("id") or ""))
+            cid = str(c.get("id") or "")
+            name_to_id.setdefault(key, cid)
             if c.get("description"):
                 name_to_description.setdefault(key, str(c["description"]))
+            if cid:
+                concept_order.setdefault(
+                    cid,
+                    (
+                        lecture_index,
+                        int(c.get("chunk_order") or 0),
+                        str(c.get("name") or cid).lower(),
+                    ),
+                )
 
     candidates = _build_lesson_candidates(lectures)
     refined_lessons: list[dict[str, Any]] = candidates
@@ -822,11 +841,16 @@ def build_course_lesson_roadmap(
                 chunks.extend(lecture_to_chunks.get(lid, []))
             lesson["chunk_ids"] = sorted(set(chunks))
 
-    final_lessons = _attach_concept_ids(refined_lessons, name_to_id, name_to_description)
+    final_lessons = _attach_concept_ids(
+        refined_lessons,
+        name_to_id,
+        name_to_description,
+        concept_order,
+    )
     if not final_lessons:
         # Refiner may have produced output that doesn't match any known concept names.
         # Fall back to the raw candidates so the student still gets *something*.
-        final_lessons = _attach_concept_ids(candidates, name_to_id, name_to_description)
+        final_lessons = _attach_concept_ids(candidates, name_to_id, name_to_description, concept_order)
 
     node_ids: list[str] = []
     for lesson in final_lessons:
