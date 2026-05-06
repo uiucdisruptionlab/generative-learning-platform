@@ -284,6 +284,7 @@ def _fetch_chunks_from_pinecone(
 def _build_composite_srs_context(
     records: list[dict[str, Any]],
     name_map: dict[str, str],
+    prior_sessions: int = 0,
 ) -> tuple[dict[str, Any], str]:
     """Build an srs_context string and a synthetic srs_record from multiple concept records.
 
@@ -358,6 +359,7 @@ def _build_composite_srs_context(
         "score": round(avg_score, 1),
         "ease_factor": round(min_ease, 4),
         "repetitions": max_reps,
+        "attempts": prior_sessions,
         "last_gaps": "; ".join(all_gaps),
         "last_strengths": "; ".join(all_strengths),
     }
@@ -479,9 +481,23 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
                     .in_("concept_id", concept_ids)
                     .execute()
                 )
-                concept_records = [r for r in (resp.data or []) if r.get("repetitions")]
+                # Include any reviewed record — repetitions=0 is valid after a failed attempt
+                concept_records = [r for r in (resp.data or []) if r.get("score") is not None]
                 if concept_records:
-                    srs_record, srs_context = _build_composite_srs_context(concept_records, name_map)
+                    prior_sessions = 0
+                    try:
+                        ps_resp = (
+                            supabase_srs.table("lesson_sessions")
+                            .select("session_id")
+                            .eq("student_id", student_id)
+                            .eq("lesson_id", lesson_id)
+                            .eq("mode", "lesson")
+                            .execute()
+                        )
+                        prior_sessions = len(ps_resp.data or [])
+                    except Exception:
+                        pass
+                    srs_record, srs_context = _build_composite_srs_context(concept_records, name_map, prior_sessions)
         except Exception as exc:
             print(f"[lesson_generator] SRS lookup skipped: {exc}")
 

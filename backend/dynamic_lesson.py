@@ -452,6 +452,10 @@ def _stage_index(name: str, stages: list[str] | None = None) -> int:
 
 def _parse_json_object(text: str) -> dict[str, Any]:
     text = text.strip()
+    # Strip markdown code fences the LLM sometimes adds despite instructions.
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
     try:
         out = json.loads(text)
         if isinstance(out, dict):
@@ -460,6 +464,17 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         pass
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
+        # Truncated response: model returned a { with no closing }. Try to close it.
+        if "{" in text:
+            partial = text.rstrip()
+            if not partial.endswith("}"):
+                partial = partial.rstrip('"') + '"}'
+            try:
+                out = json.loads(partial)
+                if isinstance(out, dict):
+                    return out
+            except json.JSONDecodeError:
+                pass
         raise ValueError(f"Model returned no JSON object: {text[:400]}")
     raw = match.group(0)
     try:
@@ -669,16 +684,26 @@ def _contextual_source_chunks(
         return _pick_context_chunks(entries, focus_query=focus)
 
     if kind == "step" and step_index is not None:
-        stype, hint = STEP_TYPES[step_index]
+        dynamic = session.get("dynamic_step_types")
+        if dynamic and step_index < len(dynamic):
+            step_info = dynamic[step_index]
+            stype = step_info["stype"]
+            hint = step_info["hint"]
+            bucket = step_info["concept_names"]
+        elif step_index < len(STEP_TYPES):
+            stype, hint = STEP_TYPES[step_index]
+            cnames = [c.get("name", "") for c in concepts if isinstance(c, dict)]
+            bucket = []
+            if cnames:
+                n = len(cnames)
+                k = len(STEP_TYPES)
+                span = max(1, (n + k - 1) // k)
+                bucket = cnames[step_index * span : (step_index + 1) * span] or [cnames[step_index % n]]
+        else:
+            stype, hint = "concept", ""
+            bucket = [c.get("name", "") for c in concepts if isinstance(c, dict)]
         prior = session.get("step_summaries") or []
         prior_txt = " ".join(p.get("excerpt", "") for p in prior[-3:])
-        cnames = [c.get("name", "") for c in concepts if isinstance(c, dict)]
-        bucket: list[str] = []
-        if cnames:
-            n = len(cnames)
-            k = len(STEP_TYPES)
-            span = max(1, (n + k - 1) // k)
-            bucket = cnames[step_index * span : (step_index + 1) * span] or [cnames[step_index % n]]
         dialogue = _recent_transcript_for_context(session)
         focus = (
             f"{stype} {hint} {title} {' '.join(bucket)} {prior_txt} {dialogue}"
@@ -757,6 +782,7 @@ def _persona_block(persona: dict[str, Any]) -> str:
             "major": persona.get("major"),
             "familiarity": persona.get("familiarity"),
             "learning_style": persona.get("learning_style"),
+            "preferred_formats": persona.get("preferred_formats"),
             "hours_per_week": persona.get("hours_per_week"),
             "preferred_formats": persona.get("preferred_formats"),
             "interests": persona.get("interests"),
@@ -777,8 +803,67 @@ def _prune_sessions() -> None:
         _SESSIONS.pop(sid, None)
 
 
+_MAX_LESSON_STEPS = 10
+
+
+def _build_dynamic_stages(
+    concepts: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """
+    Build lesson stages and per-step metadata from the lesson's concept list.
+    One step per concept, capped at _MAX_LESSON_STEPS. Extra concepts beyond the cap
+    are grouped into the final step rather than trimmed.
+    Returns (stages, dynamic_step_types).
+    """
+    n = len(concepts)
+    if n == 0:
+        return list(STAGES), []
+
+    if n <= _MAX_LESSON_STEPS:
+        groups: list[list[dict[str, Any]]] = [[c] for c in concepts]
+    else:
+        groups = [[c] for c in concepts[: _MAX_LESSON_STEPS - 1]]
+        groups.append(list(concepts[_MAX_LESSON_STEPS - 1 :]))
+
+    stages: list[str] = ["after_overview_confirm"]
+    for i in range(len(groups)):
+        stages += [
+            f"step{i}_content_llm",
+            f"reflect_step{i}_user",
+            f"widget_step{i}_user",
+            f"confirm_step{i}_user",
+        ]
+    stages += ["closing_llm", "complete"]
+
+    dynamic_step_types: list[dict[str, Any]] = []
+    for group in groups:
+        names = [c.get("name", "") for c in group if isinstance(c, dict) and c.get("name")]
+        ids = [str(c.get("id", "")) for c in group if isinstance(c, dict) and c.get("id")]
+        if len(names) == 1:
+            hint = (
+                f"Teach the concept '{names[0]}': explain its definition clearly, "
+                f"work through a concrete example grounded in the source material, "
+                f"and show how it connects to other concepts in this lesson."
+            )
+        else:
+            names_str = ", ".join(f"'{name}'" for name in names)
+            hint = (
+                f"Teach these related concepts: {names_str}. Explain how they relate to each other, "
+                f"work through a concrete example grounded in the source material, "
+                f"and connect them to the broader lesson."
+            )
+        dynamic_step_types.append({
+            "stype": "concept",
+            "hint": hint,
+            "concept_names": names,
+            "concept_ids": ids,
+        })
+
+    return stages, dynamic_step_types
+
+
 def _current_step_index(stage: str) -> int | None:
-    m = re.match(r"(?:step|reflect_step|widget_step|confirm_step)(\d)_", stage)
+    m = re.match(r"(?:step|reflect_step|widget_step|confirm_step)(\d+)_", stage)
     if not m:
         return None
     return int(m.group(1))
@@ -788,14 +873,14 @@ def _run_prior_performance_llm(session: dict[str, Any]) -> str:
     lesson = session["sources"]["lesson"]
     persona = session["sources"]["persona"]
     srs_record = session["sources"].get("srs_record") or {}
-    attempts = int(srs_record.get("attempts") or 0)
+    # prior_sessions = completed lesson sessions so far; this session is prior_sessions+1
+    prior_sessions = int(srs_record.get("attempts") or 0)
     last_score = float(srs_record.get("last_score") or srs_record.get("score") or 0)
     gaps = str(srs_record.get("last_gaps") or "").strip()
     strengths = str(srs_record.get("last_strengths") or "").strip()
 
-    # attempts = number of completed sessions so far; this session is attempts+1
-    upcoming = attempts + 1
-    ordinal = {2: "second", 3: "third", 4: "fourth"}.get(upcoming) or f"{upcoming}th"
+    upcoming = max(prior_sessions + 1, 2)  # at least 2nd — prior_performance only fires on repeats
+    ordinal = {2: "second", 3: "third", 4: "fourth", 5: "fifth"}.get(upcoming) or f"{upcoming}th"
     system = """You are a supportive AI tutor opening a repeat lesson session. Return JSON only: {"assistant_message": "string"}
 
 Write a brief (3-5 sentences), warm but honest message that:
@@ -885,13 +970,25 @@ SOURCE EXCERPTS (ranked for lesson intro from Pinecone — not the full course d
 RELATED VIDEOS (titles only): {", ".join(v.get("title", "") for v in videos)}
 
 Return the JSON object now."""
-    raw = _call_converse(system, user, temperature=0.25)
+    raw = _call_converse(system, user, temperature=0.25, max_tokens=512)
     data = _parse_json_object(raw)
     return str(data.get("assistant_message") or "").strip() or raw[:2000]
 
 
 def _run_step_content_llm(session: dict[str, Any], step_index: int) -> dict[str, Any]:
-    step_type, hint = STEP_TYPES[step_index]
+    dynamic = session.get("dynamic_step_types")
+    if dynamic and step_index < len(dynamic):
+        step_info = dynamic[step_index]
+        step_type = step_info["stype"]
+        hint = step_info["hint"]
+        total_steps = len(dynamic)
+    elif step_index < len(STEP_TYPES):
+        step_type, hint = STEP_TYPES[step_index]
+        total_steps = len(STEP_TYPES)
+    else:
+        step_type, hint = "concept", "Teach the remaining concepts from the lesson, grounded in the source material."
+        total_steps = step_index + 1
+
     lesson = session["sources"]["lesson"]
     persona = session["sources"]["persona"]
     chunks = _contextual_source_chunks(session, kind="step", step_index=step_index)
@@ -927,7 +1024,7 @@ RECENT CONVERSATION (what you and the learner have already said in this session)
 SOURCE EXCERPTS (selected for this segment + recent context, not the whole course at once):
 {_bundle_sources(chunks)}
 
-Write segment {step_index + 1}/{len(STEP_TYPES)} now. Return JSON only."""
+Write segment {step_index + 1}/{total_steps} now. Return JSON only."""
     raw = _call_converse(system, user, temperature=0.35)
     data = _parse_json_object(raw)
     title = str(data.get("title") or f"{step_type.title()}").strip()
@@ -1039,11 +1136,11 @@ def _run_engage_llm(session: dict[str, Any], step_index: int, reflection: str) -
     allowed_activities = sorted(_allowed_activity_types(persona))
     engage_chunks = _contextual_source_chunks(session, kind="engage", reflection=reflection)
     dialogue = _recent_transcript_for_context(session)
-    system = """You are an expert tutor. Return valid JSON only. No markdown fences.
+    system = """You are an expert tutor. Your entire response must be a single JSON object. Start with { and end with }. No markdown, no code fences, no preamble.
 
 Schema:
 {
-  "assistant_message": "string (brief reaction to what the learner said; encourage; clarify if needed)",
+  "assistant_message": "string — if the learner is asking a question or requesting elaboration, answer it fully in 3-5 sentences grounded in the source material; if acknowledging a genuine reflection, keep it concise (1-2 sentences)",
   "interaction": {
     "type": "none" | "mcq" | "flashcards" | "free_response" | "video",
     "payload": {}
@@ -1067,13 +1164,23 @@ Grounding rule:
 
 SOURCE EXCERPTS below are retrieved for THIS moment (last segment + their message). Use them to stay on-topic.
 
-Activity selection — DEFAULT TO GENERATING AN ACTIVITY at every checkpoint:
-- mcq: use for quick factual checks; prefer this as the default when unsure.
-- flashcards: use ONLY when the learner's preferred_formats includes flashcards/cards.
-- free_response: use when an open-ended explanation would deepen understanding.
-- video: use only when the learner explicitly asks to watch a clip or wants audiovisual explanation.
-- none: ONLY if the learner's reflection is already a detailed, multi-sentence explanation covering ALL the key points from the segment — a brief acknowledgement or single sentence is NOT enough to skip the activity. If in doubt, default to mcq.
+Activity selection — ALWAYS generate an activity. mcq is the default and should be used in most cases:
+- mcq: the default. Use it for factual checks, definitions, comparisons, and examples. When in doubt, use mcq.
+- flashcards: only when there are 3 or more distinct terms or relationships to reinforce simultaneously.
+- free_response: use sparingly — at most twice per lesson. Only choose it when an open-ended explanation adds depth that mcq genuinely cannot capture.
+- video: only when the learner explicitly asks to watch a clip or video.
+- none: ONLY if the learner's reflection is a detailed multi-sentence explanation covering ALL key points. A brief reply is never enough. If in doubt, use mcq.
+Honour LEARNER preferred_formats when selecting activity type — if the learner lists "quizzes" or "flashcards", prefer those types.
 Keep assistant wording and examples aligned with LEARNER interests/goals; avoid generic examples when profile gives specifics."""
+    fr_count = sum(
+        1 for a in (session.get("activity_history") or []) if a.get("type") == "free_response"
+    )
+    fr_cap_note = (
+        "\nIMPORTANT: The learner has already completed 2 free-response questions this session. "
+        "Do NOT use free_response. Use mcq or flashcards instead."
+        if fr_count >= 2
+        else ""
+    )
     user = f"""LESSON: {lesson.get("title")}
 CONCEPTS: {json.dumps(lesson.get("concepts", []), ensure_ascii=False)}
 LEARNER: {_persona_block(persona)}
@@ -1092,7 +1199,7 @@ LAST_ACTIVITY_RESULT (may be null):
 {json.dumps(last_activity, ensure_ascii=False)}
 
 LEARNER REFLECTION / QUESTION:
-{reflection}
+{reflection}{fr_cap_note}
 
 Return JSON only."""
     raw = _call_converse(system, user, temperature=0.4)
@@ -1107,27 +1214,20 @@ Return JSON only."""
     itype = _coerce_allowed_activity_type(itype, persona)
     payload = inter.get("payload") if isinstance(inter.get("payload"), dict) else {}
 
-    # Fallback: if the LLM chose none but the reflection is brief, force a free_response check.
+    # Fallback: if the LLM chose none but the reflection is brief, force an mcq check.
     if itype == "none" and len(reflection.split()) < 40:
-        last_block = session.get("last_step_block") or {}
-        concepts = lesson.get("concepts") or []
-        concept_names = ", ".join(c.get("name", "") for c in concepts[:3] if isinstance(c, dict))
-        fallback_q = (
-            f"In your own words, what is the most important idea from "
-            f'"{last_block.get("title") or lesson.get("title")}"'
-            + (f" as it relates to {concept_names}?" if concept_names else "?")
-        )
-        itype = "free_response"
-        payload = {
-            "question": fallback_q,
-            "reference_answer": _fallback_free_response_answer(session, fallback_q),
-        }
-
-    if itype == "free_response" and not payload.get("reference_answer"):
-        payload["reference_answer"] = _fallback_free_response_answer(
-            session,
-            str(payload.get("question") or ""),
-        )
+        try:
+            _msg, payload = _run_forced_activity_llm(
+                session,
+                step_index=step_index,
+                learner_message=reflection,
+                activity_type="mcq",
+            )
+            itype = "mcq"
+            if _msg and not msg:
+                msg = _msg
+        except Exception:
+            pass
 
     if itype == "video":
         vctx = _video_search_context(session, reflection)
@@ -1178,6 +1278,8 @@ def _session_performance_summary(session: dict[str, Any]) -> dict[str, Any]:
         atype = str(act.get("type") or "")
         if result.get("skipped"):
             skipped += 1
+        elif result.get("dont_know"):
+            incorrect += 1
         elif atype == "mcq":
             if result.get("correct") is True or result.get("selected_index") == (act.get("payload") or {}).get("correct_index"):
                 correct += 1
@@ -1613,6 +1715,29 @@ def _get_lesson_avg_score(student_id: str, lesson_id: str, client: Any) -> float
         return None
 
 
+def _get_lesson_session_score(student_id: str, lesson_id: str, client: Any) -> float | None:
+    """Return the most recent lesson session score (0-5) from lesson_sessions, or None."""
+    try:
+        resp = (
+            client.table("lesson_sessions")
+            .select("score")
+            .eq("student_id", student_id)
+            .eq("lesson_id", lesson_id)
+            .eq("mode", "lesson")
+            .not_.is_("score", "null")
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if rows and rows[0].get("score") is not None:
+            return float(rows[0]["score"])
+        return None
+    except Exception as exc:
+        print(f"[dynamic_lesson] gate session_score query failed: {exc}")
+        return None
+
+
 def _check_lesson_gate(
     student_id: str,
     lesson_id: str,
@@ -1631,7 +1756,11 @@ def _check_lesson_gate(
     prev_lesson_id = lesson_ids[idx - 1]
     avg_score = _get_lesson_avg_score(student_id, prev_lesson_id, client)
     if avg_score is None:
-        print(f"[SRS] gate  lesson={lesson_id}  prev={prev_lesson_id}  no records → passed")
+        # SRS records missing or lesson_id mismatch — fall back to session-level score
+        avg_score = _get_lesson_session_score(student_id, prev_lesson_id, client)
+    if avg_score is None:
+        # Truly no history — this is a first attempt, let through
+        print(f"[SRS] gate  lesson={lesson_id}  prev={prev_lesson_id}  no history → passed (first attempt)")
         return None
     if avg_score >= GATE_THRESHOLD:
         print(f"[SRS] gate  lesson={lesson_id}  prev={prev_lesson_id}  avg={avg_score:.2f} ≥ {GATE_THRESHOLD} → passed")
@@ -1761,19 +1890,14 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
     student_id = str(persona.get("student_id") or "")
     effective_course = course or str(persona.get("course") or "")
 
-    # --- Gate check + overdue review check (Supabase-dependent, non-fatal) ---
+    # --- Gate check (hard enforcement — own try/except so errors are visible) ---
     if student_id:
         try:
-            from srs import get_due_srs_records
             from supabase_local import get_supabase_client
-            client = get_supabase_client()
-
-            roadmap = _load_lesson_roadmap_for_student(student_id)
-            concept_map = _build_concept_map(roadmap) if roadmap else {}
-
-            # Gate: if previous lesson avg score < 3.0, block this lesson
-            if roadmap:
-                gate = _check_lesson_gate(student_id, lesson_id, roadmap, client)
+            _gate_client = get_supabase_client()
+            _gate_roadmap = _load_lesson_roadmap_for_student(student_id)
+            if _gate_roadmap:
+                gate = _check_lesson_gate(student_id, lesson_id, _gate_roadmap, _gate_client)
                 if gate:
                     lesson = sources.get("lesson") or {}
                     return {
@@ -1792,6 +1916,18 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
                         "gated_info": gate,
                         "review_count": None,
                     }
+        except Exception as exc:
+            print(f"[start_session] gate check error (non-fatal): {exc}")
+
+    # --- Overdue review check (non-fatal) ---
+    if student_id:
+        try:
+            from srs import get_due_srs_records
+            from supabase_local import get_supabase_client
+            client = get_supabase_client()
+
+            roadmap = _load_lesson_roadmap_for_student(student_id)
+            concept_map = _build_concept_map(roadmap) if roadmap else {}
 
             # Review: if overdue concepts exist for this course, run review session first
             all_due = get_due_srs_records(student_id, client=client)
@@ -1847,10 +1983,12 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
                 _SESSIONS[session_id] = session
                 return _response(session)
         except Exception as exc:
-            print(f"[start_session] gate/review check failed (non-fatal): {exc}")
+            print(f"[start_session] review check failed (non-fatal): {exc}")
 
     # --- Normal lesson session ---
     session_id = str(uuid.uuid4())
+    _lesson_concepts = (sources.get("lesson") or {}).get("concepts") or []
+    _dynamic_stages, _dynamic_step_types = _build_dynamic_stages(_lesson_concepts)
     session = {
         "session_id": session_id,
         "lesson_id": lesson_id,
@@ -1867,7 +2005,8 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
         "pending_widget": None,
         "created_at": time.time(),
         "session_type": "lesson",
-        "stages": list(STAGES),
+        "stages": _dynamic_stages,
+        "dynamic_step_types": _dynamic_step_types if _dynamic_step_types else None,
         "scored_concept_ids": set(),
     }
     srs_record = sources.get("srs_record")
@@ -1949,7 +2088,7 @@ def _auto_run_llm_stages(session: dict[str, Any]) -> None:
             session["cursor"] += 1
             continue
 
-        m = re.match(r"step(\d)_content_llm", stage)
+        m = re.match(r"step(\d+)_content_llm", stage)
         if m:
             idx = int(m.group(1))
             block = _run_step_content_llm(session, idx)
@@ -2099,7 +2238,13 @@ def tick_session(
             _append_user(session, text_msg)
             session["cursor"] += 1
 
-            engage = _run_engage_llm(session, step_i, text_msg)
+            try:
+                engage = _run_engage_llm(session, step_i, text_msg)
+            except Exception as exc:
+                session["transcript"].pop()
+                session["cursor"] -= 1
+                raise RuntimeError(f"Failed to generate tutor response: {exc}") from exc
+
             _append_assistant(
                 session,
                 engage["assistant_message"],
@@ -2181,7 +2326,11 @@ def tick_session(
                     wpayload = pending_before.get("payload") or {}
                     score = _score_widget_result(wtype, wpayload, result)
                     concepts = session["sources"]["lesson"].get("concepts") or []
-                    concept_ids = _concept_ids_for_step(concepts, step_i)
+                    _dynamic = session.get("dynamic_step_types")
+                    if _dynamic and step_i is not None and step_i < len(_dynamic):
+                        concept_ids = _dynamic[step_i]["concept_ids"]
+                    else:
+                        concept_ids = _concept_ids_for_step(concepts, step_i)
                     _cid_set = set(concept_ids)
                     _cnames = [str(c.get("name") or c.get("id") or "") for c in concepts if str(c.get("id") or "") in _cid_set]
                     print(f"[SRS] step {step_i} {wtype}  score={score}/5  concepts={_cnames}")
