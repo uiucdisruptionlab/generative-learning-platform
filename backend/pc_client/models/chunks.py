@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 @dataclass
 class ChunkMetadata:
@@ -8,6 +9,7 @@ class ChunkMetadata:
     topic : str # for topic filtering to bias retrieval 
     text : str # passed into embeddings model
     chunk_number : int # to retrieve adjacent chunks for more context
+    course_id: Optional[str] = None # explicit course id for graph-scoped roadmaps
 
     def validate_data(self):
 
@@ -34,7 +36,7 @@ class ChunkMetadata:
 
     def to_dict(self):
         self.validate_data()
-        return self.__dict__
+        return {key: value for key, value in self.__dict__.items() if value is not None}
 
 
 
@@ -60,5 +62,3 @@ class CourseChunk:
             self.values,
             self.metadata.to_dict()
         )
-
-

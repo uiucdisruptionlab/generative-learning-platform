@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS student_courses (
 -- Seed one row per persona (idempotent via ON CONFLICT DO NOTHING)
 INSERT INTO student_courses (student_id, course_id) VALUES
   ('a0000001-0000-4000-8000-000000000001', 'python'),
-  ('b0000002-0000-4000-8000-000000000002', 'MATH416'),
+  ('b0000002-0000-4000-8000-000000000002', 'BIS512'),
   ('c0000003-0000-4000-8000-000000000003', 'ALecFinal')
 ON CONFLICT (student_id, course_id) DO NOTHING;
 

@@ -70,7 +70,6 @@ function McqWidget({
       <div className="space-y-2">
         {opts.map((opt, i) => {
           const selected = idx === i
-          const show = revealed
           const isCorrect = i === correct
           return (
             <button
@@ -79,10 +78,12 @@ function McqWidget({
               disabled={revealed || disabled}
               onClick={() => setIdx(i)}
               className={`w-full text-left px-4 py-3 rounded-xl border-2 text-sm transition-all ${
-                show && isCorrect
+                revealed && isCorrect
                   ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-500/70 dark:bg-emerald-950/30'
-                  : show && selected && !isCorrect
+                  : revealed && selected && !isCorrect
                   ? 'border-red-400 bg-red-50 dark:border-red-500/70 dark:bg-red-950/25'
+                  : revealed
+                  ? 'border-slate-200/80 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-800/40 text-slate-500 opacity-80'
                   : selected
                   ? 'border-primary bg-primary/5'
                   : 'border-slate-200 dark:border-slate-700 hover:border-primary/40'
@@ -93,6 +94,14 @@ function McqWidget({
           )
         })}
       </div>
+      {revealed && (
+        <p className={`text-xs font-semibold ${idx === correct ? 'text-primary' : 'text-red-600 dark:text-red-300'}`}>
+          {idx === correct ? 'Correct!' : 'Not quite.'}
+        </p>
+      )}
+      {revealed && payload.explanation && (
+        <p className="text-xs text-slate-600 dark:text-slate-400">{payload.explanation}</p>
+      )}
       {!revealed && (
         <button
           type="button"
@@ -102,9 +111,6 @@ function McqWidget({
         >
           Check answer
         </button>
-      )}
-      {revealed && payload.explanation && (
-        <p className="text-xs text-slate-600 dark:text-slate-400">{payload.explanation}</p>
       )}
       {revealed && !sent && (
         <button
@@ -212,21 +218,37 @@ function FreeResponseWidget({
   const [text, setText] = useState('')
   const [sent, setSent] = useState(false)
   const [dontKnow, setDontKnow] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const referenceAnswer =
+    payload.reference_answer ||
+    'A strong answer should explain the key idea in your own words and connect it back to the lesson example.'
 
   const handleDontKnow = () => {
     setDontKnow(true)
+    setFeedback('Review the model answer, then try writing it in your own words.')
+  }
+
+  const submitAnswer = () => {
+    const cleaned = text.trim()
+    if (cleaned.split(/\s+/).filter(Boolean).length < 6) {
+      setFeedback('Give this one another try with at least one full sentence.')
+      return
+    }
     setSent(true)
-    onSubmit({ text: '', dont_know: true })
+    onSubmit({ text: cleaned, retried_after_help: dontKnow })
   }
 
   return (
     <div className="rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 p-5 space-y-3">
       <p className="text-sm font-medium text-slate-900 dark:text-white">{payload.question}</p>
-      {dontKnow && payload.reference_answer && (
+      {dontKnow && (
         <div className="rounded-xl border-2 border-amber-200 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-950/30 p-4 space-y-1">
           <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-300">Model answer</p>
-          <p className="text-sm text-slate-800 dark:text-slate-100 leading-relaxed">{payload.reference_answer}</p>
+          <p className="text-sm text-slate-800 dark:text-slate-100 leading-relaxed">{referenceAnswer}</p>
         </div>
+      )}
+      {feedback && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">{feedback}</p>
       )}
       {!sent && (
         <>
@@ -242,10 +264,7 @@ function FreeResponseWidget({
             <button
               type="button"
               disabled={disabled || !text.trim()}
-              onClick={() => {
-                setSent(true)
-                onSubmit({ text: text.trim() })
-              }}
+              onClick={submitAnswer}
               className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-40"
             >
               Submit
@@ -544,6 +563,20 @@ function isSessionGoneError(message: string): boolean {
   return /session not found/i.test(message)
 }
 
+/** Adaptive session stores each activity block in `transcript` as plain text (`meta.kind === 'block'`)
+ * while also returning it as `pending_widget` for Quick check (rich UI). Showing both repeats the same content.
+ * Completed blocks also stayed visible after Continue, so the rail stacked duplicate summaries next to the next check.
+ * Activity blocks belong only in Quick check — keep the walkthrough for tutor/student dialogue (knowledge check, etc.). */
+function transcriptForWalkthrough(transcript: InteractiveTranscriptEntry[]): InteractiveTranscriptEntry[] {
+  return transcript.filter((entry) => {
+    const kind =
+      entry.meta && typeof entry.meta === 'object' && 'kind' in entry.meta
+        ? String((entry.meta as { kind?: unknown }).kind ?? '')
+        : ''
+    return kind !== 'block'
+  })
+}
+
 function normalizePendingWidget(raw: unknown): PendingWidget | null {
   if (!raw || typeof raw !== 'object') return null
   const w = raw as { type?: string; payload?: unknown }
@@ -700,6 +733,7 @@ export default function InteractiveLessonPage() {
   }, [lessonId, persona, courseOverride, sessionOverride])
 
   const pending = state ? normalizePendingWidget(state.pending_widget as unknown) : null
+  const walkthroughEntries = state ? transcriptForWalkthrough(state.transcript) : []
 
   return (
     <AppLayout
@@ -814,7 +848,7 @@ export default function InteractiveLessonPage() {
                 <span className="material-symbols-outlined text-primary text-2xl">route</span>
                 Your walkthrough
               </h3>
-              {state.transcript.map((entry, idx) => (
+              {walkthroughEntries.map((entry, idx) => (
                 <TranscriptBlock key={idx} entry={entry} />
               ))}
               <div ref={bottomRef} />
