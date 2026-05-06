@@ -4,18 +4,156 @@ import LearnerProfileCard, { type LearnerProfile } from '../components/LearnerPr
 import { usePersona } from '../contexts/PersonaContext';
 import { fetchStudent, updateStudent, type StudentProfile, type StudentProfileUpdate } from '../api/home';
 
+function titleCaseSnake(val: string): string {
+  return val.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function learningGoalsToDisplayList(
+  goals: NonNullable<StudentProfile['learning_goals']>,
+): string[] {
+  const g = goals as Record<string, unknown>;
+  const out: string[] = [];
+
+  const asStr = (v: unknown): string | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'object') return null;
+    const s = String(v).trim();
+    return s || null;
+  };
+
+  const fmtEnumish = (s: string) =>
+    /^[a-z0-9_]+$/i.test(s) && s.includes('_') ? titleCaseSnake(s) : s;
+
+  const primary = asStr(g.primary_focus);
+  if (primary) out.push(primary);
+
+  const coding = asStr(g.coding_experience);
+  if (coding) out.push(`Coding experience: ${fmtEnumish(coding)}`);
+
+  const familiarity = asStr(g.topic_familiarity);
+  if (familiarity) out.push(`Topic familiarity: ${fmtEnumish(familiarity)}`);
+
+  const handled = new Set(['primary_focus', 'coding_experience', 'topic_familiarity']);
+  for (const [key, value] of Object.entries(g)) {
+    if (handled.has(key)) continue;
+    const s = asStr(value);
+    if (!s) continue;
+    const label =
+      key === 'target_course' || key === 'course' ? 'Course focus' : titleCaseSnake(key);
+    out.push(`${label}: ${fmtEnumish(s)}`);
+  }
+
+  return out;
+}
+
+function humanizeLessonId(lessonId: string): string {
+  const id = lessonId.trim();
+  const m = id.match(/^lesson_0*(\d+)$/i);
+  if (m) return `Lesson ${Number(m[1])}`;
+  return titleCaseSnake(id.replace(/-/g, '_'));
+}
+
+function joinNatural(items: string[]): string {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
+}
+
+/** roadmap_progress: completed_lessons + current_lesson_id (backend sets both to the lesson just finished). */
+function formatRoadmapProgress(progress: unknown): string {
+  if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return '';
+  const lines: string[] = [];
+  for (const [courseId, raw] of Object.entries(progress as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const cp = raw as Record<string, unknown>;
+    const completed = Array.isArray(cp.completed_lessons)
+      ? (cp.completed_lessons as string[]).map((x) => String(x).trim()).filter(Boolean)
+      : [];
+    const currentRaw = cp.current_lesson_id != null ? String(cp.current_lesson_id).trim() : '';
+    const courseLabel = titleCaseSnake(courseId.replace(/-/g, '_'));
+    const labels = completed.map(humanizeLessonId);
+    const n = completed.length;
+
+    if (n === 0) {
+      lines.push(
+        currentRaw
+          ? `${courseLabel}: Not started yet — open ${humanizeLessonId(currentRaw)} when you're ready.`
+          : `${courseLabel}: No lessons completed yet.`,
+      );
+      continue;
+    }
+
+    const donePhrase = `${n} lesson${n === 1 ? '' : 's'} completed: ${joinNatural(labels)}.`;
+
+    // current_lesson_id is the last lesson touched (and is always in completed_lessons); don’t echo it twice.
+    if (currentRaw && !completed.includes(currentRaw)) {
+      lines.push(
+        `${courseLabel}: ${donePhrase} Continue with ${humanizeLessonId(currentRaw)}.`,
+      );
+    } else {
+      lines.push(`${courseLabel}: ${donePhrase}`);
+    }
+  }
+  return lines.join('\n\n');
+}
+
+function formatEnumishString(s: string): string {
+  const t = s.trim();
+  if (!t) return '';
+  if (/^[a-z0-9_]+$/i.test(t) && t.includes('_')) return titleCaseSnake(t);
+  return t;
+}
+
+/** Normalize API llm_profile into display keys + string values (no raw JSON in the card). */
+function mapLlmProfileForDisplay(
+  raw: NonNullable<StudentProfile['llm_profile']>,
+): Record<string, string> | null {
+  const out: Record<string, string> = {};
+
+  const style = raw.learning_style_summary != null ? String(raw.learning_style_summary).trim() : '';
+  if (style) out['Learning Style'] = style;
+
+  const notes = raw.notes != null ? String(raw.notes).trim() : '';
+  if (notes) out['Notes'] = notes;
+
+  const conf = raw.subject_confidence != null ? String(raw.subject_confidence).trim() : '';
+  if (conf) out['Prior Experience'] = formatEnumishString(conf);
+
+  if (
+    raw.roadmap_progress != null &&
+    typeof raw.roadmap_progress === 'object' &&
+    !Array.isArray(raw.roadmap_progress)
+  ) {
+    const formatted = formatRoadmapProgress(raw.roadmap_progress);
+    if (formatted.trim()) out['Roadmap progress'] = formatted;
+  }
+
+  const handled = new Set([
+    'learning_style_summary',
+    'notes',
+    'subject_confidence',
+    'roadmap_progress',
+  ]);
+  for (const [key, value] of Object.entries(raw)) {
+    if (handled.has(key)) continue;
+    if (value === null || value === undefined) continue;
+    const label = titleCaseSnake(key);
+    if (typeof value === 'object') {
+      const s = JSON.stringify(value);
+      if (s !== '{}' && s !== '[]') out[label] = s;
+    } else {
+      const sv = String(value).trim();
+      if (sv) out[label] = formatEnumishString(sv);
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 function mapStudentProfile(student: StudentProfile): LearnerProfile {
-  const goals = student.learning_goals
-    ? Object.entries(student.learning_goals).map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`)
-    : []
-  const llmProfile = student.llm_profile
-    ? Object.fromEntries(
-        Object.entries(student.llm_profile).map(([key, value]) => [
-          key === 'learning_style_summary' ? 'Learning Style' : key,
-          value,
-        ]),
-      )
-    : null
+  const goals = student.learning_goals ? learningGoalsToDisplayList(student.learning_goals) : [];
+  const llmProfile = student.llm_profile ? mapLlmProfileForDisplay(student.llm_profile) : null;
   return {
     id: student.id,
     name: student.name,

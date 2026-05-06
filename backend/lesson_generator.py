@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from bedrock.client import create_bedrock_runtime_client
 from youtube.client import search_videos
 
 _BACKEND_DIR = Path(__file__).resolve().parent
@@ -20,73 +19,12 @@ _spec.loader.exec_module(_glp_sc)
 get_student_profile = _glp_sc.get_student_profile
 get_supabase_client = _glp_sc.get_supabase_client
 
-AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
-
 COURSE_NAMESPACES: dict[str, str] = {
     "accounting": "15.501_Transcripts",
     "python": "6.0001_Transcripts",
     "financing": "11.437_Transcripts",
     "BIS512": "BIS512",
 }
-
-SYSTEM_PROMPT = """
-You are an expert educational content creator. Your job is to generate a personalized lesson for a student based on:
-- The lesson topic and concepts
-- Raw source material (lecture chunks)
-- The student's learner profile
-- Relevant YouTube videos
-
-Return JSON only. No markdown. No prose outside JSON.
-
-Output schema:
-{
-  "lesson_id": "string",
-  "title": "string",
-  "overview": "string (2-3 sentences introducing the lesson and why it matters)",
-  "steps": [
-    {
-      "step_number": 1,
-      "title": "string",
-      "type": "concept" | "example" | "summary",
-      "content": "string (rich explanation, tailored to the learner profile)"
-    }
-  ],
-  "videos": [
-    {
-      "title": "string",
-      "url": "string",
-      "channel": "string",
-      "thumbnail": "string",
-      "reason": "string (one sentence on why this video is relevant)"
-    }
-  ],
-  "questions": [
-    {
-      "type": "multiple_choice" | "fill_in_the_blank",
-      "question": "string",
-      "options": ["string"] (only for multiple_choice, 4 options),
-      "answer": "string",
-      "explanation": "string (brief explanation of why this is the correct answer)"
-    }
-  ]
-}
-
-Rules:
-- Tailor the depth, tone, and structure of every step to the learner profile provided.
-- If PRIOR PERFORMANCE data is present, follow its directive exactly — adjust difficulty, depth, and remediation accordingly.
-- Personalize examples and analogies to the learner's interests and goals/career direction whenever relevant.
-- Steps should flow logically: start with core concepts, then move to examples, then a summary.
-- Aim for exactly 3 steps.
-- Generate exactly 3 questions. Mix multiple choice and fill in the blank.
-- Questions should test genuine understanding, not just recall.
-- Use only concepts and facts present in the source material. Do not invent information.
-- Keep the overview to 2 sentences max.
-- Keep each step's content under 100 words.
-- For fill_in_the_blank questions, use ___ to mark the blank in the question string.
-- The "options" field should only appear for multiple_choice questions.
-- Be concise throughout — this is a summary lesson, not a textbook.
-""".strip()
 
 
 def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: str | None) -> dict[str, Any]:
@@ -342,45 +280,30 @@ def _fetch_chunks_from_pinecone(
         return [], meta, []
 
 
-COURSE_KEY_MAP: dict[str, str] = {
-    "ALecFinal": "accounting",
-    "accounting": "accounting",
-    "python": "python",
-    "financing": "financing",
-}
 
+def _build_composite_srs_context(
+    records: list[dict[str, Any]],
+    name_map: dict[str, str],
+) -> tuple[dict[str, Any], str]:
+    """Build an srs_context string and a synthetic srs_record from multiple concept records.
 
-def _load_roadmap_cache(course: str) -> dict[str, Any]:
-    key = COURSE_KEY_MAP.get(course, course)
-    cache_path = Path(__file__).parent / f"roadmap_cache_{key}.json"
-    if not cache_path.exists():
-        raise FileNotFoundError(f"roadmap_cache_{key}.json not found. Hit GET /roadmap?course={course} first.")
-    return json.loads(cache_path.read_text(encoding="utf-8"))
+    Returns (synthetic_record, context_string). The synthetic record keeps
+    _run_prior_performance_llm working without changes.
+    """
+    if not records:
+        return {}, ""
 
+    avg_score = sum(float(r.get("score") or 0) for r in records) / len(records)
+    min_ease = min(float(r.get("ease_factor") or 2.5) for r in records)
+    max_reps = max(int(r.get("repetitions") or 0) for r in records)
 
-def _get_lesson_from_cache(lesson_id: str, course: str) -> dict[str, Any]:
-    roadmap = _load_roadmap_cache(course)
-    for lesson in roadmap.get("lessons", []):
-        if lesson["lesson_id"] == lesson_id:
-            return lesson
-    raise ValueError(f"Lesson '{lesson_id}' not found in roadmap cache for course '{course}'.")
-
-
-def _build_srs_context(srs_record: dict[str, Any] | None) -> str:
-    if not srs_record:
-        return ""
-    last_score = float(srs_record.get("last_score") or srs_record.get("score") or 0)
-    ease_factor = float(srs_record.get("ease_factor") or 2.5)
-    interval_days = int(srs_record.get("interval_days") or 1)
-    attempts = int(srs_record.get("attempts") or srs_record.get("repetitions") or 1)
-
-    if ease_factor < 1.8 or last_score < 3:
+    if min_ease < 1.8 or avg_score < 3:
         assessment = "struggling"
         directive = (
             "Remediate — use simpler language, more concrete examples, and rebuild from "
             "first principles. Do not assume prior understanding carries over."
         )
-    elif ease_factor >= 2.8 and last_score >= 4:
+    elif min_ease >= 2.8 and avg_score >= 4:
         assessment = "strong"
         directive = (
             "Student has a strong grasp. Go deeper, introduce nuance, and include a more "
@@ -394,28 +317,51 @@ def _build_srs_context(srs_record: dict[str, Any] | None) -> str:
         )
 
     lines = [
-        f"PRIOR PERFORMANCE ON THIS LESSON:",
-        f"- Attempts: {attempts}",
-        f"- Last score: {last_score:.0f}/5",
-        f"- Ease factor: {ease_factor:.2f} (2.5 = neutral; lower = harder to retain)",
-        f"- Days until next scheduled review: {interval_days}",
+        "PRIOR PERFORMANCE ON THIS LESSON:",
+        f"- Attempts: {max_reps}",
+        f"- Average concept score: {avg_score:.1f}/5",
         f"- Assessment: {assessment}",
         f"→ {directive}",
     ]
 
-    gaps = srs_record.get("last_gaps") or ""
-    strengths = srs_record.get("last_strengths") or ""
-    if gaps:
+    weak_lines: list[str] = []
+    strong_lines: list[str] = []
+    all_gaps: list[str] = []
+    all_strengths: list[str] = []
+    for r in sorted(records, key=lambda x: float(x.get("score") or 0)):
+        cid = str(r.get("concept_id") or "")
+        cname = name_map.get(cid) or cid[:16]
+        score = float(r.get("score") or 0)
+        gaps = str(r.get("last_gaps") or "").strip()
+        strengths = str(r.get("last_strengths") or "").strip()
+        if score < 3:
+            weak_lines.append(f"  • {cname}" + (f": {gaps}" if gaps else ""))
+            if gaps:
+                all_gaps.append(f"{cname}: {gaps}")
+        elif score >= 4:
+            strong_lines.append(f"  • {cname}" + (f": {strengths}" if strengths else ""))
+            if strengths:
+                all_strengths.append(f"{cname}: {strengths}")
+
+    if weak_lines:
         lines.append(
-            f"WEAK AREAS FROM LAST ATTEMPT (re-explain these with fresh examples; "
-            f"design activities that specifically target them): {gaps}"
+            "WEAK AREAS (re-explain with fresh examples; design activities that target these):\n"
+            + "\n".join(weak_lines)
         )
-    if strengths:
+    if strong_lines:
         lines.append(
-            f"STRONG AREAS FROM LAST ATTEMPT (acknowledge briefly; do not dwell): {strengths}"
+            "STRONG AREAS (acknowledge briefly; push to deeper applications):\n"
+            + "\n".join(strong_lines)
         )
 
-    return "\n".join(lines)
+    synthetic_record = {
+        "score": round(avg_score, 1),
+        "ease_factor": round(min_ease, 4),
+        "repetitions": max_reps,
+        "last_gaps": "; ".join(all_gaps),
+        "last_strengths": "; ".join(all_strengths),
+    }
+    return synthetic_record, "\n".join(lines)
 
 
 def _build_prompt(lesson: dict[str, Any], chunks: list[str], persona: dict, videos: list[dict], srs_context: str = "") -> str:
@@ -485,8 +431,8 @@ def _parse_json(raw: str) -> dict[str, Any]:
 
 def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | None = None) -> dict[str, Any]:
     """
-    Same inputs as generate_lesson: roadmap lesson, Pinecone chunks, YouTube search.
-    Used by the interactive / dynamic lesson loop without generating the full lesson JSON.
+    Load all sources needed for an interactive lesson session: persona, roadmap lesson,
+    Pinecone chunks, YouTube videos, and SRS context. Used by dynamic_lesson.py.
     """
     persona = _load_persona_from_supabase(persona_id, course_override=course_override)
     course = course_override or persona.get("course", "accounting")
@@ -513,16 +459,31 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
             print(f"[lesson_generator] Supabase roadmap lookup failed: {exc}")
 
     if lesson is None:
-        lesson = _get_lesson_from_cache(lesson_id, course)
+        raise ValueError(
+            f"Lesson '{lesson_id}' not found in roadmap for student '{student_id}'. "
+            "Rebuild the roadmap first via POST /roadmap/{student_id}/rebuild."
+        )
 
     srs_record: dict[str, Any] | None = None
+    srs_context = ""
     if student_id:
         try:
-            from srs import get_srs_record
-            srs_record = get_srs_record(student_id, lesson_id, client=get_supabase_client())
+            concept_ids = [str(c.get("id") or "") for c in lesson.get("concepts") or [] if c.get("id")]
+            name_map = {str(c.get("id") or ""): str(c.get("name") or "") for c in lesson.get("concepts") or []}
+            if concept_ids:
+                supabase_srs = get_supabase_client()
+                resp = (
+                    supabase_srs.table("srs_records")
+                    .select("*")
+                    .eq("student_id", student_id)
+                    .in_("concept_id", concept_ids)
+                    .execute()
+                )
+                concept_records = [r for r in (resp.data or []) if r.get("repetitions")]
+                if concept_records:
+                    srs_record, srs_context = _build_composite_srs_context(concept_records, name_map)
         except Exception as exc:
             print(f"[lesson_generator] SRS lookup skipped: {exc}")
-    srs_context = _build_srs_context(srs_record)
 
     chunk_ids = lesson.get("chunk_ids", [])
     if chunk_ids:

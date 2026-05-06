@@ -27,8 +27,6 @@ MAX_SOURCE_CHARS = 14_000
 # In-memory sessions (dev / single-node). Replace with Redis if you scale horizontally.
 _SESSIONS: dict[str, dict[str, Any]] = {}
 _SESSION_MAX = 200
-
-# Same layout as server.py lesson cache (GET /lesson writes here).
 _LESSON_CACHE_DIR = Path(__file__).resolve().parent / "lesson_cache"
 
 
@@ -448,8 +446,8 @@ STAGES: list[str] = ["after_overview_confirm"] + sum(
 ) + ["closing_llm", "complete"]
 
 
-def _stage_index(name: str) -> int:
-    return STAGES.index(name)
+def _stage_index(name: str, stages: list[str] | None = None) -> int:
+    return (stages or STAGES).index(name)
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
@@ -1476,6 +1474,273 @@ Return JSON only."""
     return msg, payload
 
 
+def _concept_ids_for_step(concepts: list[dict[str, Any]], step_index: int) -> list[str]:
+    """Return Neo4j concept IDs assigned to the given step_index (0-based)."""
+    n = len(concepts)
+    k = len(STEP_TYPES)
+    span = max(1, (n + k - 1) // k)
+    start = step_index * span
+    end = (step_index + 1) * span
+    bucket = [c for c in concepts[start:end] if isinstance(c, dict)] or (
+        [concepts[step_index % n]] if concepts else []
+    )
+    return [str(c.get("id") or "") for c in bucket if c.get("id")]
+
+
+def _score_free_response_llm(question: str, reference_answer: str, learner_response: str) -> int:
+    """Score a free-response answer 0–5 via a compact LLM call."""
+    system = (
+        "You score a learner's response for spaced repetition. Return JSON only: {\"score\": 0}. "
+        "0=blank/irrelevant. 1=tiny fragment. 2=partial, misses core. 3=understands core with gaps. "
+        "4=correct with minor omissions. 5=complete and precise."
+    )
+    payload = json.dumps({
+        "question": question,
+        "reference_answer": reference_answer,
+        "learner_response": learner_response,
+    })
+    try:
+        raw = _call_converse(system, payload, temperature=0, max_tokens=80)
+        data = _parse_json_object(raw)
+        return max(0, min(5, int(round(float(data.get("score", 2))))))
+    except Exception:
+        return 2
+
+
+def _score_widget_result(widget_type: str, payload: dict[str, Any], result: dict[str, Any]) -> int:
+    """Map a widget submission to a 0–5 SRS quality score."""
+    if result.get("skipped"):
+        return 0
+    if result.get("dont_know"):
+        return 1
+    if widget_type == "mcq":
+        correct_index = payload.get("correct_index", 0)
+        selected_index = result.get("selected_index")
+        if selected_index is None:
+            return 0
+        return 4 if selected_index == correct_index else 2
+    if widget_type == "free_response":
+        text = str(result.get("text") or "").strip()
+        if not text:
+            return 1
+        return _score_free_response_llm(
+            str(payload.get("question") or ""),
+            str(payload.get("reference_answer") or ""),
+            text,
+        )
+    if widget_type in ("flashcards", "video"):
+        return 3
+    return 2
+
+
+def _derive_srs_metadata(activity: dict[str, Any], score: int) -> dict[str, Any] | None:
+    """Extract gaps/strengths from a widget result to store on the SRS record."""
+    wtype = str(activity.get("type") or "")
+    if wtype not in ("mcq", "free_response"):
+        return None
+    question = str((activity.get("payload") or {}).get("question") or "").strip()
+    if not question:
+        return None
+    if score >= 4:
+        return {"gaps": [], "strengths": [question]}
+    if score <= 2:
+        return {"gaps": [question], "strengths": []}
+    return None
+
+
+def _write_srs_for_concepts(
+    session: dict[str, Any],
+    concept_ids: list[str],
+    score: int,
+    *,
+    lesson_id: str | None = None,
+    activity: dict[str, Any] | None = None,
+) -> None:
+    """Write per-concept SRS records. Non-fatal on any error."""
+    from srs import upsert_srs_record
+    from supabase_local import get_supabase_client
+
+    persona = session["sources"].get("persona") or {}
+    student_id = str(persona.get("student_id") or "")
+    course = str(session.get("course") or persona.get("course") or "")
+    effective_lesson_id = lesson_id or str(session.get("lesson_id") or "")
+
+    if not student_id:
+        return
+    # Build a quick id→name lookup from session data for logging
+    _name_map: dict[str, str] = {}
+    for _c in ((session.get("sources") or {}).get("lesson") or {}).get("concepts") or []:
+        _name_map[str(_c.get("id") or "")] = str(_c.get("name") or "")
+    for _rc in session.get("review_concepts") or []:
+        _name_map[str(_rc.get("concept_id") or "")] = str(_rc.get("concept_name") or "")
+    meta = _derive_srs_metadata(activity, score) if activity else None
+    try:
+        client = get_supabase_client()
+        for cid in concept_ids:
+            if not cid:
+                continue
+            upsert_srs_record(
+                student_id=student_id,
+                concept_id=cid,
+                course=course,
+                lesson_id=effective_lesson_id,
+                score=score,
+                metadata=meta,
+                client=client,
+            )
+            session.setdefault("scored_concept_ids", set()).add(cid)
+            _cname = _name_map.get(cid) or cid[:12]
+            print(f"[SRS] ✓ wrote  {_cname!r}  score={score}/5  lesson={effective_lesson_id}")
+    except Exception as exc:
+        print(f"[dynamic_lesson] SRS write failed (non-fatal): {exc}")
+
+
+def _get_lesson_avg_score(student_id: str, lesson_id: str, client: Any) -> float | None:
+    """Return the average SRS score across all concepts in a lesson, or None if no records."""
+    try:
+        resp = (
+            client.table("srs_records")
+            .select("score")
+            .eq("student_id", student_id)
+            .eq("lesson_id", lesson_id)
+            .not_.is_("score", "null")
+            .execute()
+        )
+        scores = [r["score"] for r in (resp.data or []) if r.get("score") is not None]
+        return sum(scores) / len(scores) if scores else None
+    except Exception as exc:
+        print(f"[dynamic_lesson] gate score query failed: {exc}")
+        return None
+
+
+def _check_lesson_gate(
+    student_id: str,
+    lesson_id: str,
+    roadmap: dict[str, Any],
+    client: Any,
+) -> dict[str, Any] | None:
+    """Return gate block info if the student hasn't cleared the previous lesson, else None."""
+    GATE_THRESHOLD = 3.0
+    lessons = roadmap.get("lessons") or []
+    lesson_ids = [str(lsn.get("lesson_id") or "") for lsn in lessons]
+    if lesson_id not in lesson_ids:
+        return None
+    idx = lesson_ids.index(lesson_id)
+    if idx == 0:
+        return None
+    prev_lesson_id = lesson_ids[idx - 1]
+    avg_score = _get_lesson_avg_score(student_id, prev_lesson_id, client)
+    if avg_score is None:
+        print(f"[SRS] gate  lesson={lesson_id}  prev={prev_lesson_id}  no records → passed")
+        return None
+    if avg_score >= GATE_THRESHOLD:
+        print(f"[SRS] gate  lesson={lesson_id}  prev={prev_lesson_id}  avg={avg_score:.2f} ≥ {GATE_THRESHOLD} → passed")
+        return None
+    print(f"[SRS] gate  lesson={lesson_id}  prev={prev_lesson_id}  avg={avg_score:.2f} < {GATE_THRESHOLD} → BLOCKED")
+    return {
+        "blocked": True,
+        "blocking_lesson_id": prev_lesson_id,
+        "avg_score": round(avg_score, 2),
+        "threshold": GATE_THRESHOLD,
+    }
+
+
+def _load_lesson_roadmap_for_student(student_id: str) -> dict[str, Any] | None:
+    """Load the cached lesson roadmap for this student from Supabase roadmap_cache."""
+    try:
+        from supabase_local import get_supabase_client
+        client = get_supabase_client()
+        resp = (
+            client.table("roadmap_cache")
+            .select("roadmap")
+            .eq("student_id", student_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            return None
+        roadmap = rows[0].get("roadmap")
+        if isinstance(roadmap, str):
+            roadmap = json.loads(roadmap)
+        if isinstance(roadmap, dict) and roadmap.get("lessons"):
+            return roadmap
+        return None
+    except Exception as exc:
+        print(f"[dynamic_lesson] roadmap load failed: {exc}")
+        return None
+
+
+def _build_concept_map(roadmap: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Build a concept_id → {name, description} lookup from all lessons in the roadmap."""
+    result: dict[str, dict[str, str]] = {}
+    for lsn in roadmap.get("lessons") or []:
+        for c in lsn.get("concepts") or []:
+            cid = str(c.get("id") or "")
+            if cid:
+                result[cid] = {
+                    "name": str(c.get("name") or ""),
+                    "description": str(c.get("description") or ""),
+                }
+    return result
+
+
+def _run_review_recap_llm(
+    session: dict[str, Any],
+    concept_index: int,
+) -> tuple[str, dict[str, Any]]:
+    """Generate a short review recap and a widget (mcq or free_response) for one overdue concept."""
+    review_concepts = session.get("review_concepts") or []
+    if concept_index >= len(review_concepts):
+        return (
+            "Let's do a quick review.",
+            {"type": "free_response", "payload": {"question": "What do you remember?"}},
+        )
+    concept = review_concepts[concept_index]
+    concept_name = str(concept.get("concept_name") or concept.get("concept_id") or "")
+    last_score = int(concept.get("score") or 0)
+    description = str(concept.get("concept_description") or "")
+    total = len(review_concepts)
+
+    system = """You are a tutor running a spaced repetition review. Return JSON only.
+Schema:
+{
+  "recap": "string (2-3 sentences: name the concept, hint at what was tricky, set up the question)",
+  "widget": {
+    "type": "mcq" | "free_response",
+    "payload": {}
+  }
+}
+For mcq payload: {"question":"string","options":["4 strings"],"correct_index":0-3,"explanation":"string"}
+For free_response payload: {"question":"string","reference_answer":"string (2-3 sentence model answer)"}
+Choose mcq when last_score <= 2, free_response when last_score >= 3."""
+
+    user = json.dumps({
+        "concept_name": concept_name,
+        "concept_description": description,
+        "last_score": last_score,
+        "review_index": concept_index + 1,
+        "review_total": total,
+        "persona": _persona_block(session["sources"].get("persona") or {}),
+    }, ensure_ascii=False)
+
+    try:
+        raw = _call_converse(system, user, temperature=0.3, max_tokens=600)
+        data = _parse_json_object(raw)
+        recap = str(data.get("recap") or "").strip() or f"Let's review: {concept_name}."
+        widget_raw = data.get("widget") or {}
+        wtype = str(widget_raw.get("type") or "mcq").lower()
+        if wtype not in ("mcq", "free_response"):
+            wtype = "mcq" if last_score <= 2 else "free_response"
+        wpayload = widget_raw.get("payload") if isinstance(widget_raw.get("payload"), dict) else {}
+        return recap, {"type": wtype, "payload": wpayload}
+    except Exception:
+        return (
+            f"Let's quickly review: {concept_name}.",
+            {"type": "free_response", "payload": {"question": f"In your own words, explain: {concept_name}."}},
+        )
+
+
 def _append_assistant(session: dict[str, Any], text: str, *, meta: dict[str, Any] | None = None) -> None:
     session.setdefault("transcript", []).append(
         {"role": "assistant", "content": text, "meta": meta or {}}
@@ -1492,13 +1757,105 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
     had_youtube_results = bool(sources.get("videos"))
     cache_note = _merge_videos_from_lesson_cache(sources, lesson_id, sources.get("persona") or {}, course)
     video_status = _video_status(sources, had_youtube_results, cache_note)
+    persona = sources.get("persona") or {}
+    student_id = str(persona.get("student_id") or "")
+    effective_course = course or str(persona.get("course") or "")
 
+    # --- Gate check + overdue review check (Supabase-dependent, non-fatal) ---
+    if student_id:
+        try:
+            from srs import get_due_srs_records
+            from supabase_local import get_supabase_client
+            client = get_supabase_client()
+
+            roadmap = _load_lesson_roadmap_for_student(student_id)
+            concept_map = _build_concept_map(roadmap) if roadmap else {}
+
+            # Gate: if previous lesson avg score < 3.0, block this lesson
+            if roadmap:
+                gate = _check_lesson_gate(student_id, lesson_id, roadmap, client)
+                if gate:
+                    lesson = sources.get("lesson") or {}
+                    return {
+                        "session_id": "",
+                        "session_type": "gated",
+                        "stage": "gated",
+                        "lesson_title": str(lesson.get("title") or lesson_id),
+                        "concepts": list(lesson.get("concepts") or []),
+                        "videos": _normalize_videos(sources.get("videos") or []),
+                        "video_status": video_status,
+                        "chunks_status": _public_chunks_status(sources),
+                        "transcript": [],
+                        "pending_widget": None,
+                        "awaiting": "none",
+                        "model_id": MODEL_ID,
+                        "gated_info": gate,
+                        "review_count": None,
+                    }
+
+            # Review: if overdue concepts exist for this course, run review session first
+            all_due = get_due_srs_records(student_id, client=client)
+            overdue = [r for r in all_due if not effective_course or r.get("course") == effective_course]
+            if overdue:
+                review_concepts = [
+                    {
+                        **r,
+                        "concept_name": concept_map.get(str(r.get("concept_id") or ""), {}).get("name")
+                            or str(r.get("concept_id") or ""),
+                        "concept_description": concept_map.get(str(r.get("concept_id") or ""), {}).get("description") or "",
+                    }
+                    for r in overdue
+                ]
+                _rc_names = [rc.get("concept_name") or str(rc.get("concept_id") or "")[:12] for rc in review_concepts]
+                print(f"[SRS] review session  {len(review_concepts)} overdue concept(s): {_rc_names}")
+                review_stages: list[str] = []
+                for i in range(len(review_concepts)):
+                    review_stages.append(f"review_recap_{i}_llm")
+                    review_stages.append(f"review_widget_{i}_user")
+                review_stages.append("complete")
+
+                review_sources: dict[str, Any] = {
+                    "lesson": {"title": "Concept Review", "concepts": []},
+                    "videos": [],
+                    "persona": persona,
+                    "chunk_entries": [],
+                    "chunks": [],
+                    "chunks_meta": {"status": "review", "detail": None, "requested_ids": 0, "loaded_segments": 0},
+                }
+                session_id = str(uuid.uuid4())
+                session: dict[str, Any] = {
+                    "session_id": session_id,
+                    "lesson_id": lesson_id,
+                    "persona_id": persona_id,
+                    "course": effective_course,
+                    "sources": review_sources,
+                    "video_status": {"source": "none", "detail": None},
+                    "cursor": 0,
+                    "transcript": [],
+                    "step_summaries": [],
+                    "last_step_block": None,
+                    "last_activity": None,
+                    "activity_history": [],
+                    "pending_widget": None,
+                    "created_at": time.time(),
+                    "session_type": "review",
+                    "stages": review_stages,
+                    "review_concepts": review_concepts,
+                    "scored_concept_ids": set(),
+                }
+                _auto_run_llm_stages(session)
+                _SESSIONS[session_id] = session
+                return _response(session)
+        except Exception as exc:
+            print(f"[start_session] gate/review check failed (non-fatal): {exc}")
+
+    # --- Normal lesson session ---
     session_id = str(uuid.uuid4())
-    session: dict[str, Any] = {
+    session = {
         "session_id": session_id,
         "lesson_id": lesson_id,
         "persona_id": persona_id,
-        "course": course,
+        "course": effective_course,
         "sources": sources,
         "video_status": video_status,
         "cursor": 0,
@@ -1509,38 +1866,28 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
         "activity_history": [],
         "pending_widget": None,
         "created_at": time.time(),
+        "session_type": "lesson",
+        "stages": list(STAGES),
+        "scored_concept_ids": set(),
     }
     srs_record = sources.get("srs_record")
-    if srs_record:  # any existing record means at least one prior scored attempt
+    if srs_record:
         recap = _run_prior_performance_llm(session)
         _append_assistant(session, recap, meta={"kind": "prior_performance"})
 
     overview = _run_overview_llm(session)
     _append_assistant(session, overview, meta={"kind": "overview"})
     _SESSIONS[session_id] = session
-
-    stage = STAGES[session["cursor"]]
-    return {
-        "session_id": session_id,
-        "stage": stage,
-        "lesson_title": sources["lesson"].get("title", ""),
-        "concepts": sources["lesson"].get("concepts", []),
-        "videos": _normalize_videos(sources["videos"]),
-        "video_status": video_status,
-        "chunks_status": _public_chunks_status(sources),
-        "transcript": session["transcript"],
-        "pending_widget": None,
-        "awaiting": _awaiting_for_stage(stage),
-        "model_id": MODEL_ID,
-    }
+    return _response(session)
 
 
 def _awaiting_for_stage(stage: str) -> Literal["confirm", "text", "widget", "none"]:
-    if stage == "complete":
+    if stage in ("complete", "gated"):
         return "none"
-    # First checkpoint after the overview — name does not end in _user but still needs Yes / not yet.
     if stage == "after_overview_confirm":
         return "confirm"
+    if re.match(r"review_widget_\d+_user", stage):
+        return "widget"
     if "confirm" in stage and "user" in stage:
         return "confirm"
     if stage.startswith("reflect_"):
@@ -1566,9 +1913,12 @@ def _public_transcript(session: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _response(session: dict[str, Any]) -> dict[str, Any]:
-    stage = STAGES[session["cursor"]] if session["cursor"] < len(STAGES) else "complete"
+    stages = session.get("stages") or STAGES
+    stage = stages[session["cursor"]] if session["cursor"] < len(stages) else "complete"
+    session_type = session.get("session_type", "lesson")
     return {
         "session_id": session["session_id"],
+        "session_type": session_type,
         "stage": stage,
         "lesson_title": session["sources"]["lesson"].get("title", ""),
         "concepts": session["sources"]["lesson"].get("concepts", []),
@@ -1579,13 +1929,16 @@ def _response(session: dict[str, Any]) -> dict[str, Any]:
         "pending_widget": session.get("pending_widget"),
         "awaiting": _awaiting_for_stage(stage),
         "model_id": MODEL_ID,
+        "gated_info": session.get("gated_info"),
+        "review_count": len(session.get("review_concepts") or []) if session_type == "review" else None,
     }
 
 
 def _auto_run_llm_stages(session: dict[str, Any]) -> None:
     """Run consecutive LLM stages until we need user input or complete."""
-    while session["cursor"] < len(STAGES):
-        stage = STAGES[session["cursor"]]
+    stages = session.get("stages") or STAGES
+    while session["cursor"] < len(stages):
+        stage = stages[session["cursor"]]
         if stage == "complete":
             return
         if stage.endswith("_user"):
@@ -1606,6 +1959,22 @@ def _auto_run_llm_stages(session: dict[str, Any]) -> None:
             session["cursor"] += 1
             continue
 
+        m = re.match(r"review_recap_(\d+)_llm", stage)
+        if m:
+            concept_i = int(m.group(1))
+            recap_msg, widget = _run_review_recap_llm(session, concept_i)
+            review_concepts = session.get("review_concepts") or []
+            concept_name = ""
+            if concept_i < len(review_concepts):
+                concept_name = str(review_concepts[concept_i].get("concept_name") or "")
+            _append_assistant(
+                session, recap_msg,
+                meta={"kind": "review_recap", "concept_index": concept_i, "concept_name": concept_name},
+            )
+            session["pending_widget"] = widget
+            session["cursor"] += 1
+            continue
+
         # Should not reach other _llm names without user; safety
         session["cursor"] += 1
 
@@ -1621,10 +1990,11 @@ def tick_session(
     if not session:
         raise KeyError("unknown session")
 
-    if session["cursor"] >= len(STAGES) or STAGES[session["cursor"]] == "complete":
+    stages = session.get("stages") or STAGES
+    if session["cursor"] >= len(stages) or stages[session["cursor"]] == "complete":
         return _response(session)
 
-    stage = STAGES[session["cursor"]]
+    stage = stages[session["cursor"]]
     text_msg = (message or "").strip()
 
     # Allow graceful early exit from any stage that accepts user text.
@@ -1633,7 +2003,7 @@ def tick_session(
         bye = _run_exit_summary_llm(session, text_msg)
         _append_assistant(session, bye, meta={"kind": "closing", "early_exit": True})
         session["pending_widget"] = None
-        session["cursor"] = _stage_index("complete")
+        session["cursor"] = _stage_index("complete", stages)
         _maybe_save_session(session)
         return _response(session)
 
@@ -1643,7 +2013,7 @@ def tick_session(
     # Optional widget was skipped by the model — don't block the learner on an empty slot.
     if stage.startswith("widget_") and session.get("pending_widget") is None:
         session["cursor"] += 1
-        stage = STAGES[session["cursor"]] if session["cursor"] < len(STAGES) else "complete"
+        stage = stages[session["cursor"]] if session["cursor"] < len(stages) else "complete"
 
     if stage.endswith("_user"):
         if stage.startswith("confirm") or stage == "after_overview_confirm":
@@ -1661,7 +2031,7 @@ def tick_session(
                 bye = _run_exit_summary_llm(session, text_msg)
                 _append_assistant(session, bye, meta={"kind": "closing", "early_exit": True})
                 session["pending_widget"] = None
-                session["cursor"] = _stage_index("complete")
+                session["cursor"] = _stage_index("complete", stages)
                 _maybe_save_session(session)
                 handled_confirm = True
 
@@ -1686,7 +2056,7 @@ def tick_session(
                     meta={"kind": "engage", "step_index": step_i, "forced_activity": requested},
                 )
                 session["pending_widget"] = {"type": requested, "payload": payload}
-                session["cursor"] = _stage_index(f"widget_step{step_i}_user")
+                session["cursor"] = _stage_index(f"widget_step{step_i}_user", stages)
                 handled_confirm = True
 
             if not handled_confirm and (
@@ -1739,10 +2109,49 @@ def tick_session(
             payload = engage["interaction"]["payload"]
             if itype == "none":
                 session["pending_widget"] = None
-                session["cursor"] = _stage_index(f"confirm_step{step_i}_user")
+                session["cursor"] = _stage_index(f"confirm_step{step_i}_user", stages)
             else:
                 session["pending_widget"] = {"type": itype, "payload": payload}
-                session["cursor"] = _stage_index(f"widget_step{step_i}_user")
+                session["cursor"] = _stage_index(f"widget_step{step_i}_user", stages)
+
+        elif re.match(r"review_widget_\d+_user", stage):
+            # Review session: submit a widget result for a specific overdue concept.
+            m_rv = re.match(r"review_widget_(\d+)_user", stage)
+            concept_i = int(m_rv.group(1)) if m_rv else 0
+            pending_before = session.get("pending_widget")
+            if pending_before is not None and widget_result is None and action != "confirm_yes":
+                raise ValueError(
+                    "Submit widget_result for this activity, or send action=confirm_yes to skip it."
+                )
+            result = widget_result or {"skipped": action == "confirm_yes"}
+            summary = json.dumps(result, ensure_ascii=False)[:2000]
+            _append_user(session, f"[Completed activity: {summary}]")
+            if isinstance(pending_before, dict):
+                activity_entry = {
+                    "type": pending_before.get("type"),
+                    "payload": pending_before.get("payload"),
+                    "result": result,
+                }
+                session["last_activity"] = activity_entry
+                session.setdefault("activity_history", []).append(activity_entry)
+                # Write SRS for this overdue concept
+                wtype = str(pending_before.get("type") or "")
+                wpayload = pending_before.get("payload") or {}
+                score = _score_widget_result(wtype, wpayload, result)
+                review_concepts = session.get("review_concepts") or []
+                if concept_i < len(review_concepts):
+                    rc = review_concepts[concept_i]
+                    rc_cid = str(rc.get("concept_id") or "")
+                    rc_lid = str(rc.get("lesson_id") or "")
+                    rc_name = rc.get("concept_name") or rc_cid[:12]
+                    print(f"[SRS] review {concept_i + 1}/{len(review_concepts)}  {wtype}  score={score}/5  concept={rc_name!r}")
+                    if rc_cid:
+                        _write_srs_for_concepts(
+                            session, [rc_cid], score, lesson_id=rc_lid,
+                            activity={"type": wtype, "payload": wpayload, "result": result},
+                        )
+            session["pending_widget"] = None
+            session["cursor"] += 1
 
         elif stage.startswith("widget_"):
             pending_before = session.get("pending_widget")
@@ -1754,18 +2163,33 @@ def tick_session(
                 raise ValueError(
                     "Submit widget_result for this activity, or send action=confirm_yes to skip it."
                 )
-            summary = json.dumps(widget_result or {"skipped": action == "confirm_yes"}, ensure_ascii=False)[
-                :2000
-            ]
+            result = widget_result or {"skipped": action == "confirm_yes"}
+            summary = json.dumps(result, ensure_ascii=False)[:2000]
             _append_user(session, f"[Completed activity: {summary}]")
             if isinstance(pending_before, dict):
                 activity_entry = {
                     "type": pending_before.get("type"),
                     "payload": pending_before.get("payload"),
-                    "result": widget_result or {"skipped": action == "confirm_yes"},
+                    "result": result,
                 }
                 session["last_activity"] = activity_entry
                 session.setdefault("activity_history", []).append(activity_entry)
+                # Write SRS for the concepts associated with this lesson step
+                step_i = _current_step_index(stage)
+                if step_i is not None:
+                    wtype = str(pending_before.get("type") or "")
+                    wpayload = pending_before.get("payload") or {}
+                    score = _score_widget_result(wtype, wpayload, result)
+                    concepts = session["sources"]["lesson"].get("concepts") or []
+                    concept_ids = _concept_ids_for_step(concepts, step_i)
+                    _cid_set = set(concept_ids)
+                    _cnames = [str(c.get("name") or c.get("id") or "") for c in concepts if str(c.get("id") or "") in _cid_set]
+                    print(f"[SRS] step {step_i} {wtype}  score={score}/5  concepts={_cnames}")
+                    if concept_ids:
+                        _write_srs_for_concepts(
+                            session, concept_ids, score,
+                            activity={"type": wtype, "payload": wpayload, "result": result},
+                        )
             session["pending_widget"] = None
             session["cursor"] += 1
 
@@ -1778,8 +2202,9 @@ def _maybe_save_session(session: dict[str, Any]) -> None:
     """Persist the session to `lesson_sessions` once when it reaches the complete stage."""
     if session.get("saved_to_db"):
         return
+    stages = session.get("stages") or STAGES
     cursor = session.get("cursor", 0)
-    if cursor < len(STAGES) and STAGES[cursor] != "complete":
+    if cursor < len(stages) and stages[cursor] != "complete":
         return
     session["saved_to_db"] = True
     try:
@@ -1798,6 +2223,7 @@ def _save_session_to_db(session: dict[str, Any]) -> None:
     student_id = str(persona.get("student_id") or "")
     course_id = str(session.get("course") or persona.get("course") or "")
     lesson_id = str(session.get("lesson_id") or "")
+    session_type = session.get("session_type") or "lesson"
 
     if not student_id or not lesson_id:
         return
@@ -1806,10 +2232,7 @@ def _save_session_to_db(session: dict[str, Any]) -> None:
     verdict = perf.get("verdict", "no_activities")
     correct = int(perf.get("correct_or_engaged") or 0)
     total = int(perf.get("total_activities") or 0)
-    if total > 0:
-        raw_score = round(5 * correct / total)
-    else:
-        raw_score = 0
+    raw_score = round(5 * correct / total) if total > 0 else 0
     passed = verdict in ("strong", "mixed")
 
     started_ts = session.get("created_at")
@@ -1826,31 +2249,66 @@ def _save_session_to_db(session: dict[str, Any]) -> None:
         "lesson_id": lesson_id,
         "concept_id": lesson_id,
         "concept_name": str(lesson.get("title") or ""),
-        "mode": "interactive",
+        "mode": session_type,
         "score": raw_score,
         "passed": passed,
         "transcript": session.get("transcript") or [],
         "metadata": {
             "activity_summary": perf,
             "step_summaries": session.get("step_summaries") or [],
+            "scored_concept_ids": list(session.get("scored_concept_ids") or []),
         },
         "started_at": started_at,
     }
 
+    scored_ids = list(session.get("scored_concept_ids") or [])
+    print(
+        f"[SRS] session complete  type={session_type}  lesson={lesson_id}"
+        f"  score={raw_score}/5  verdict={verdict}  activities={correct}/{total}"
+        f"  concepts_scored={len(scored_ids)}"
+    )
+
     client = get_supabase_client()
     client.table("lesson_sessions").upsert(row, on_conflict="session_id").execute()
 
-    # Increment attempts once per completed session (not per widget score).
+    if session_type == "lesson" and passed:
+        _advance_roadmap_past_lesson(student_id, lesson_id, course_id, client)
+
+
+def _advance_roadmap_past_lesson(
+    student_id: str,
+    lesson_id: str,
+    course_id: str,
+    client: Any,
+) -> None:
+    """Advance roadmap_position to the first concept of the next lesson once a lesson is passed."""
+    from srs import get_roadmap_position, set_roadmap_position
+
     try:
-        from srs import get_srs_record
-        existing = get_srs_record(student_id, lesson_id, client=client)
-        prev_attempts = int((existing or {}).get("attempts") or 0)
-        client.table("srs_records").upsert(
-            {"student_id": student_id, "concept_id": lesson_id, "attempts": prev_attempts + 1},
-            on_conflict="student_id,concept_id",
-        ).execute()
+        roadmap = _load_lesson_roadmap_for_student(student_id)
+        if not roadmap:
+            print(f"[roadmap] no roadmap found for student={student_id}, skipping advance")
+            return
+        flat_idx = 0
+        for lsn in roadmap.get("lessons") or []:
+            concepts = lsn.get("concepts") or []
+            count = len(concepts)
+            if not count:
+                continue
+            if str(lsn.get("lesson_id") or "") == lesson_id:
+                next_index = flat_idx + count
+                position = get_roadmap_position(student_id, course_id=course_id, client=client)
+                current_index = int(position.get("current_index") or 0)
+                if next_index > current_index:
+                    set_roadmap_position(student_id, next_index, course_id=course_id, client=client)
+                    print(f"[roadmap] advanced  lesson={lesson_id}  index={current_index}→{next_index}")
+                else:
+                    print(f"[roadmap] position already past lesson={lesson_id} (current={current_index}, next={next_index}), skipping")
+                return
+            flat_idx += count
+        print(f"[roadmap] lesson_id={lesson_id} not found in roadmap for student={student_id}")
     except Exception as exc:
-        print(f"[_save_session_to_db] attempts increment failed: {exc}")
+        print(f"[roadmap] advance failed (non-fatal): {exc}")
 
 
 def enqueue_widget(session_id: str, widget: dict[str, Any], *, note: str | None = None) -> dict[str, Any]:
