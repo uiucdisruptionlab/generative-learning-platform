@@ -1,11 +1,8 @@
 import os
 from typing import List, Dict, Any
-from pinecone import Pinecone, PineconeApiException
 import unstructured_client
 from unstructured_client.models import operations, shared
-
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index = os.getenv("PINECONE_INDEX", "library")
+from pypdf import PdfReader
 
 class PDFTextExtractor:
     """
@@ -14,13 +11,27 @@ class PDFTextExtractor:
     """
 
     def __init__(self, unstructured_api_key: str):
-        self.unstructured_client = unstructured_client.UnstructuredClient(api_key_auth=unstructured_api_key)
+        self._unstructured_enabled = bool(unstructured_api_key)
+        self.unstructured_client = (
+            unstructured_client.UnstructuredClient(api_key_auth=unstructured_api_key)
+            if self._unstructured_enabled
+            else None
+        )
 
     def extract_texts(self, pdf_path: str) -> List[Dict[str, Any]]:
         """
         Parse PDF and extract text elements.
         Returns list of dicts: {'text': str, 'metadata': dict}
         """
+        if not self._unstructured_enabled:
+            reader = PdfReader(pdf_path)
+            texts = []
+            for i, page in enumerate(reader.pages, start=1):
+                text = (page.extract_text() or "").strip()
+                if text:
+                    texts.append({"text": text, "metadata": {"page_number": i}})
+            return texts
+
         with open(pdf_path, "rb") as f:
             files_content = f.read()
 

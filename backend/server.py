@@ -481,8 +481,11 @@ def _looks_like_late_lesson(lesson: dict[str, Any]) -> bool:
         if isinstance(concept, dict)
     )
     haystack = " ".join(text_parts).lower()
+    def _kw_pattern(kw: str) -> str:
+        return r"\b" + re.escape(kw).replace(r"\ ", r"\s+") + r"\b"
+
     return any(
-        re.search(rf"\b{re.escape(keyword).replace(r'\ ', r'\s+')}\b", haystack)
+        re.search(_kw_pattern(keyword), haystack)
         for keyword in LATE_LESSON_KEYWORDS
     )
 

@@ -34,6 +34,13 @@ def lecture_id_for(course_id: str, pdf_path: Path) -> str:
     return f"{course_id}_{clean}"
 
 
+def lecture_number_from_pdf(pdf_path: Path) -> int:
+    match = re.search(r"(?:lec|lecture)[_\-\s]*(\d+)", pdf_path.stem, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return 10**9
+
+
 def ingest_pdf(
     pdf_path: Path,
     course_id: str,
@@ -84,13 +91,21 @@ def ingest_pdf(
             records.append(course_chunk.to_pinecone_record())
 
         if enable_graph_ingestion:
-            extracted = extract_concepts_from_chunk(
-                {
-                    "chunk_id": chunk_id,
-                    "text": chunk_text,
-                    "metadata": chunk.get("metadata", {}),
-                }
-            )
+            extracted = {
+                "chunk_id": chunk_id,
+                "concepts": [],
+                "relationships": [],
+            }
+            try:
+                extracted = extract_concepts_from_chunk(
+                    {
+                        "chunk_id": chunk_id,
+                        "text": chunk_text,
+                        "metadata": chunk.get("metadata", {}),
+                    }
+                )
+            except Exception as exc:
+                print(f"[{offering_id}] concept extraction failed for {chunk_id}: {exc}. Continuing with chunk-only graph ingest.")
             ingest_graph(course_chunk, extracted)
 
     if pinecone_client and records:
@@ -106,6 +121,12 @@ def main() -> None:
     parser.add_argument("--namespace", default="BIS512")
     parser.add_argument("--graph-only", action="store_true")
     parser.add_argument("--enable-graph-ingestion", action="store_true")
+    parser.add_argument(
+        "--min-lecture",
+        type=int,
+        default=1,
+        help="Skip PDFs whose lecture number is below this value (ALecFinal always included when present).",
+    )
     args = parser.parse_args()
 
     folder = Path(args.folder)
@@ -116,7 +137,7 @@ def main() -> None:
     pinecone_api_key = os.getenv("PINECONE_API_KEY", "")
     unstructured_api_key = os.getenv("UNSTRUCTURED_API_KEY", "")
     if not unstructured_api_key:
-        raise RuntimeError("UNSTRUCTURED_API_KEY environment variable is required.")
+        print("UNSTRUCTURED_API_KEY not set. Falling back to local PDF text extraction via pypdf.")
     if not args.graph_only and (not pinecone_api_key or not pinecone_index):
         raise RuntimeError("PINECONE_API_KEY and PINECONE_INDEX are required unless --graph-only is set.")
 
@@ -125,6 +146,11 @@ def main() -> None:
         raise RuntimeError(f"No PDFs found in {folder}")
 
     for pdf_path in pdfs:
+        lec_num = lecture_number_from_pdf(pdf_path)
+        is_final = pdf_path.stem.lower() == "alecfinal"
+        if lec_num < args.min_lecture and not is_final:
+            print(f"Skipping {pdf_path.name} (--min-lecture {args.min_lecture})")
+            continue
         print(f"Processing {pdf_path.name}")
         ingest_pdf(
             pdf_path=pdf_path,

@@ -36,6 +36,8 @@ class TextChunker:
                     'chunk': chunk,
                     'metadata': chunk_metadata
                 })
-                print(f"Text Chunked: {chunk}\n")
+                # Avoid printing chunk text directly; some PDFs include characters
+                # that fail on default Windows console encodings.
+                print(f"Chunked element {i + 1}, chunk {j + 1}")
         
         return chunks

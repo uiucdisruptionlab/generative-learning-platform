@@ -14,3 +14,11 @@ env/
 **/__pycache__/
 *.py[cod]
 *$py.class
+
+# Ingestion artifacts
+backend/sample_data/
+backend/logs/
+backend/.ingest_state.json
+
+# Log files
+*.log
