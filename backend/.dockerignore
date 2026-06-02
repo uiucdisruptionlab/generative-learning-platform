@@ -1,0 +1,10 @@
+.venv
+__pycache__
+*.py[cod]
+*.log
+.env
+sample_data/
+logs/
+.ingest_state.json
+lesson_cache/
+roadmap_cache*.json
