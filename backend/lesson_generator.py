@@ -20,9 +20,14 @@ get_student_profile = _glp_sc.get_student_profile
 get_supabase_client = _glp_sc.get_supabase_client
 
 COURSE_NAMESPACES: dict[str, str] = {
+    "ALec": "15.501_Transcripts",
     "accounting": "15.501_Transcripts",
+    "15.501": "15.501_Transcripts",
+    "PLec": "6.0001_Transcripts",
     "python": "6.0001_Transcripts",
+    "6.0001": "6.0001_Transcripts",
     "financing": "11.437_Transcripts",
+    "11.437": "11.437_Transcripts",
     "BIS512": "BIS512",
 }
 
@@ -161,9 +166,18 @@ def _candidate_namespaces(
     if env_ns:
         out.append(env_ns)
 
+    if course:
+        out.append(course)
+
     mapped = COURSE_NAMESPACES.get(course, "")
-    if mapped:
+    if mapped and mapped not in out:
         out.append(mapped)
+    elif course:
+        lower_course = course.lower()
+        for prefix, ns in COURSE_NAMESPACES.items():
+            if lower_course.startswith(prefix.lower()) and ns not in out:
+                out.append(ns)
+                break
 
     lecture_ids = lesson.get("lecture_ids") or []
     for lec in lecture_ids:
@@ -177,6 +191,10 @@ def _candidate_namespaces(
             pref = m.group(1).strip()
             if pref:
                 out.append(pref)
+                if "_" in pref:
+                    simple_pref = pref.split("_")[0].strip()
+                    if simple_pref:
+                        out.append(simple_pref)
 
     # Sometimes data lands in the default namespace.
     out.append("")
@@ -189,6 +207,86 @@ def _candidate_namespaces(
         seen.add(ns)
         deduped.append(ns)
     return deduped
+
+
+def _list_pinecone_namespaces(index: Any) -> list[str]:
+    try:
+        stats = index.describe_index_stats()
+        namespaces = stats.get("namespaces") if isinstance(stats, dict) else getattr(stats, "namespaces", None)
+        if isinstance(namespaces, dict):
+            return sorted(namespaces.keys())
+    except Exception:
+        pass
+    return []
+
+
+def _fetch_chunks_from_available_namespaces(
+    chunk_ids: list[str],
+    excluded_namespaces: list[str],
+) -> tuple[list[str], dict[str, Any], list[dict[str, Any]]]:
+    """Try all namespaces present in the Pinecone index when the likely candidates fail."""
+    meta: dict[str, Any] = {
+        "requested_ids": len(chunk_ids),
+        "namespace": "fallback",
+        "index": os.getenv("PINECONE_INDEX") or "",
+        "loaded_segments": 0,
+        "status": "no_vectors_or_text",
+        "detail": None,
+        "namespaces_tried": [],
+    }
+
+    if not chunk_ids:
+        meta["status"] = "no_chunk_ids"
+        meta["detail"] = "This lesson has no chunk_ids in the roadmap."
+        return [], meta, []
+
+    try:
+        from pinecone import Pinecone
+    except ImportError as exc:
+        meta["status"] = "import_error"
+        meta["detail"] = (
+            "The `pinecone` package is not importable in the Python process running the API "
+            f"({exc!r}). Install into that same environment: `pip install pinecone` and restart uvicorn."
+        )
+        print(f"[lesson_generator] {meta['detail']}")
+        return [], meta, []
+
+    api_key = os.getenv("PINECONE_API_KEY", "").strip()
+    index_name = os.getenv("PINECONE_INDEX", "").strip()
+    if not api_key or not index_name:
+        meta["status"] = "env_incomplete"
+        meta["detail"] = "Set PINECONE_API_KEY and PINECONE_INDEX in backend/.env (same env as uvicorn)."
+        print("[lesson_generator] PINECONE_API_KEY or PINECONE_INDEX unset; skipping chunk fetch.")
+        return [], meta, []
+
+    try:
+        pc = Pinecone(api_key=api_key)
+        index = pc.Index(index_name)
+        available_ns = _list_pinecone_namespaces(index)
+        meta["available_namespaces"] = available_ns
+        best_texts: list[str] = []
+        best_entries: list[dict[str, Any]] = []
+        best_meta: dict[str, Any] | None = None
+
+        for ns in available_ns:
+            if ns in excluded_namespaces:
+                continue
+            texts, ns_meta, entries = _fetch_chunks_from_pinecone(chunk_ids, ns)
+            meta["namespaces_tried"].append(ns)
+            if not best_meta or len(texts) > len(best_texts):
+                best_texts, best_entries, best_meta = texts, entries, ns_meta
+            if len(texts) == len(chunk_ids):
+                break
+
+        if best_meta:
+            return best_texts, best_meta, best_entries
+
+        return [], meta, []
+    except Exception as exc:
+        meta["status"] = "fetch_error"
+        meta["detail"] = str(exc)
+        print(f"[lesson_generator] Pinecone fallback fetch failed: {exc}")
+        return [], meta, []
 
 
 def _fetch_chunks_from_pinecone(
@@ -269,6 +367,12 @@ def _fetch_chunks_from_pinecone(
             )
             if missing:
                 meta["missing_or_empty_ids_sample"] = missing[:5]
+            try:
+                available = _list_pinecone_namespaces(index)
+                if available:
+                    meta["available_namespaces"] = available
+            except Exception:
+                pass
         elif missing:
             meta["status"] = "partial"
             meta["detail"] = f"Some chunk_ids had no vector or empty text (e.g. {missing[:3]})."
@@ -540,10 +644,25 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
             "loaded_segments": 0,
         }
         chunks_meta["namespaces_tried"] = tried
+
+        if not chunks and chunks_meta.get("status") == "no_vectors_or_text":
+            fallback_texts, fallback_meta, fallback_entries = _fetch_chunks_from_available_namespaces(chunk_ids, tried)
+            if fallback_texts:
+                chunks = fallback_texts
+                chunk_entries = fallback_entries
+                chunks_meta = fallback_meta
+            elif fallback_meta:
+                chunks_meta["detail"] = (
+                    str(chunks_meta.get("detail") or "")
+                    + f" Namespaces tried: {', '.join(tried) or '(none)'}."
+                    + f" Available namespaces: {', '.join(fallback_meta.get('available_namespaces') or []) or '(none)'}."
+                )
+                chunks_meta["namespaces_tried"] = tried + (fallback_meta.get("namespaces_tried") or [])
+
         if not chunks and chunks_meta.get("status") == "no_vectors_or_text":
             chunks_meta["detail"] = (
                 str(chunks_meta.get("detail") or "")
-                + f" Namespaces tried: {', '.join(tried) or '(none)'}."
+                + f" Namespaces tried: {', '.join(chunks_meta.get('namespaces_tried') or []) or '(none)'}."
             )
     else:
         chunks = []

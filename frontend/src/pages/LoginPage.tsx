@@ -1,14 +1,10 @@
 import { Link } from 'react-router-dom'
+import GLPLogo from '../components/GLPLogo'
+import glpLogo from '../assets/glp-logo.png'
 
 export default function LoginPage() {
   return (
-    <div
-      className="min-h-screen flex flex-col relative"
-      style={{
-        background:
-          'linear-gradient(145deg, #E8EDF4 0%, #f7f6f5 22%, #ffffff 45%, #FFEED9 68%, #E8EDF4 100%)',
-      }}
-    >
+    <div className="min-h-screen flex flex-col relative bg-[radial-gradient(circle_at_top_left,_rgba(19,41,75,0.08),_transparent_18%),radial-gradient(circle_at_bottom_right,_rgba(255,95,5,0.08),_transparent_24%),#f7fafc]">
       <div className="learning-pathway absolute w-full h-full overflow-hidden z-0 pointer-events-none">
         <svg className="absolute w-full h-full opacity-35" fill="none" viewBox="0 0 1440 800" xmlns="http://www.w3.org/2000/svg">
           <path className="stroke-dasharray-[10,10]" d="M-50 750C200 650 400 700 600 500C800 300 1100 400 1490 100" stroke="#13294B" strokeWidth={4} />
@@ -33,12 +29,9 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <header className="relative z-10 flex items-center justify-between whitespace-nowrap px-8 py-5 bg-white/95 backdrop-blur-md border-b-2 border-industrial/35">
+      <header className="relative z-10 flex items-center justify-between whitespace-nowrap px-8 py-5 bg-white/95 backdrop-blur-md border-b-2 border-illini-blue/20">
         <Link to="/login" className="flex items-center gap-4">
-          <div className="size-12 rounded-2xl bg-gradient-to-br from-illini-blue/15 to-primary/10 flex items-center justify-center text-illini-blue ring-1 ring-industrial/25 shrink-0">
-            <span className="material-symbols-outlined text-3xl font-light">rocket_launch</span>
-          </div>
-          <h2 className="text-slate-900 text-base font-bold leading-tight font-logo tracking-normal">Generative Learning Platform</h2>
+          <GLPLogo />
         </Link>
         <div className="flex items-center gap-4">
           <button className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 hover:text-illini-blue transition-colors">
@@ -49,9 +42,12 @@ export default function LoginPage() {
       </header>
 
       <main className="relative z-10 flex-grow flex items-center justify-center p-6">
-        <div className="max-w-[480px] w-full bg-white/95 backdrop-blur-sm rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] border-2 border-industrial/35 overflow-hidden">
-            <div className="h-48 bg-gradient-to-br from-illini-blue to-industrial flex flex-col items-center justify-center overflow-hidden border-b-2 border-industrial/50">
-              <span className="material-symbols-outlined text-white text-6xl drop-shadow-md">rocket_launch</span>
+        <div className="max-w-[480px] w-full bg-white/95 backdrop-blur-sm rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] border-2 border-illini-blue/10 overflow-hidden">
+            <div className="h-48 bg-gradient-to-br from-illini-blue to-illini-orange flex flex-col items-center justify-center overflow-hidden border-b-2 border-illini-blue/30">
+              <div className="rounded-[1.5rem] bg-white/10 p-5 shadow-lg shadow-illini-blue/20 overflow-hidden">
+                <img src={glpLogo} alt="GLP Logo" className="h-16 w-16 object-contain" />
+              </div>
+              <p className="mt-4 text-white/90 text-sm uppercase tracking-[0.25em] font-semibold">GLP learning hub</p>
             </div>
           <div className="p-8 md:p-12 flex flex-col items-center text-center">
             <h1 className="text-4xl font-extrabold text-slate-900 mb-3 tracking-tight font-display">Sign in to GLP</h1>
@@ -65,24 +61,24 @@ export default function LoginPage() {
               <div className="bg-white rounded-lg p-1.5 flex items-center justify-center shadow-inner">
                 <span className="material-symbols-outlined text-primary font-bold text-2xl">school</span>
               </div>
-              <span className="text-lg">Login with Canvas</span>
+              <span className="text-lg">Login with NetID</span>
             </Link>
-            <div className="bg-storm-300/50 p-5 rounded-2xl border-2 border-industrial/45 w-full mb-10">
+            <div className="bg-illini-blue/5 p-5 rounded-2xl border-2 border-illini-blue/20 w-full mb-10">
               <div className="flex items-start gap-4 text-left">
                 <span className="material-symbols-outlined text-illini-blue text-[24px]">info</span>
                 <p className="text-sm text-slate-900 leading-normal">
-                  You will be redirected to the <span className="font-bold text-black underline decoration-industrial/40">UIUC Canvas authentication service</span> to securely verify your identity.
+                  You will be redirected to the <span className="font-bold text-black underline decoration-illini-orange/40">Canvas authentication service</span> to securely verify your identity.
                 </p>
               </div>
             </div>
             <div className="flex flex-col gap-6 w-full">
-              <div className="h-[2px] bg-storm-300 w-full rounded-full" />
+              <div className="h-[2px] bg-illini-blue/10 w-full rounded-full" />
               <div className="flex justify-between items-center text-sm font-medium">
                 <span className="text-slate-500 flex items-center gap-2">
                   <span className="material-symbols-outlined text-[18px] text-illini-blue">verified_user</span>
                   Secure Login
                 </span>
-                <a href="#" className="text-primary font-bold hover:underline transition-colors">Trouble signing in?</a>
+                <a href="#" className="text-illini-blue font-bold hover:underline transition-colors">Trouble signing in?</a>
               </div>
             </div>
           </div>
@@ -93,13 +89,13 @@ export default function LoginPage() {
         <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 mb-6">
           <a href="#" className="text-slate-600 font-semibold text-sm hover:text-primary transition-colors">Privacy Policy</a>
           <a href="#" className="text-slate-600 font-semibold text-sm hover:text-primary transition-colors">Terms of Service</a>
-          <a href="#" className="text-slate-600 font-semibold text-sm hover:text-primary transition-colors">UIUC Support</a>
+          <a href="#" className="text-slate-600 font-semibold text-sm hover:text-primary transition-colors">Support</a>
           <a href="#" className="text-slate-600 font-semibold text-sm hover:text-primary transition-colors">Contact GLP</a>
         </div>
         <div className="flex items-center justify-center gap-2 mb-2">
           <span className="material-symbols-outlined text-illini-blue/40 text-sm">rocket</span>
           <p className="text-slate-500 text-[11px] uppercase tracking-[0.15em] font-bold">
-            © 2024 Generative Learning Platform (GLP). All rights reserved.
+            © Generative Learning Platform (GLP). All rights reserved.
           </p>
         </div>
       </footer>

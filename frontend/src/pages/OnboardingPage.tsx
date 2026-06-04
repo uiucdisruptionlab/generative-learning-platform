@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { streamMessage, emptyProfile, type OnboardingMessage, type OnboardingProfile } from '../api/onboarding'
 import LearnerProfileCard, { type LearnerProfile } from '../components/LearnerProfileCard'
+import GLPLogo from '../components/GLPLogo'
 
 function titleCase(val: string): string {
   return val.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -140,15 +141,10 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-stone-50 via-storm-300/25 to-stone-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
-      <header className="flex items-center justify-between px-8 py-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b-2 border-industrial/35 dark:border-slate-700/50 shrink-0">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-illini-blue/10 via-primary/15 to-white dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 font-sans text-slate-800 dark:text-slate-100 antialiased">
+      <header className="flex items-center justify-between px-8 py-5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b-2 border-illini-blue/20 shrink-0">
         <Link to="/login" className="flex items-center gap-4">
-          <div className="size-12 rounded-2xl bg-gradient-to-br from-illini-blue/15 to-primary/10 flex items-center justify-center text-illini-blue ring-1 ring-industrial/25 shrink-0">
-            <span className="material-symbols-outlined text-3xl font-light">rocket_launch</span>
-          </div>
-          <h2 className="text-slate-900 dark:text-white text-base font-bold leading-tight font-logo tracking-normal">
-            Generative Learning Platform
-          </h2>
+          <GLPLogo />
         </Link>
       </header>
 

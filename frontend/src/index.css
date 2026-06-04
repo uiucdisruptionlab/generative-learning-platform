@@ -14,10 +14,14 @@
 
 html, body {
   overflow-x: hidden;
+  min-height: 100%;
 }
 
 body {
   font-family: 'Inter', 'Lexend', sans-serif;
+  background-image: radial-gradient(circle at top left, rgba(19, 41, 75, 0.08), transparent 18%),
+    radial-gradient(circle at bottom right, rgba(255, 95, 5, 0.08), transparent 24%);
+  background-color: #f7fafc;
 }
 
 h1, h2, h3, h4 {
