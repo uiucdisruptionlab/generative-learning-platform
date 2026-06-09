@@ -1,6 +1,7 @@
 node_modules
 dist
 .env
+.env.production
 backend/roadmap_cache*.json
 backend/lesson_cache/
 .claude/settings.local.json

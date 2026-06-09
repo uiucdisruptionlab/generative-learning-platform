@@ -3,6 +3,8 @@ import { useNavigate, Link } from 'react-router-dom'
 import { streamMessage, emptyProfile, type OnboardingMessage, type OnboardingProfile } from '../api/onboarding'
 import LearnerProfileCard, { type LearnerProfile } from '../components/LearnerProfileCard'
 import GLPLogo from '../components/GLPLogo'
+import { usePersona } from '../contexts/PersonaContext'
+import { PERSONAS } from '../data/personas'
 
 function titleCase(val: string): string {
   return val.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -37,6 +39,7 @@ function toDisplayProfile(p: OnboardingProfile): LearnerProfile {
 
 export default function OnboardingPage() {
   const navigate = useNavigate()
+  const { setCurrentPersona } = usePersona()
   const [messages, setMessages] = useState<OnboardingMessage[]>([])
   const [profile, setProfile] = useState<OnboardingProfile>(emptyProfile())
   const [input, setInput] = useState('')
@@ -136,6 +139,9 @@ export default function OnboardingPage() {
     if (doneProfile) {
       const display = toDisplayProfile(doneProfile)
       localStorage.setItem('glp_learner_profile', JSON.stringify(display))
+      const nameLower = (doneProfile.name ?? '').toLowerCase().trim()
+      const matchedPersona = Object.keys(PERSONAS).find(id => id === nameLower)
+      if (matchedPersona) setCurrentPersona(matchedPersona)
     }
     navigate('/roadmap', { replace: true })
   }
