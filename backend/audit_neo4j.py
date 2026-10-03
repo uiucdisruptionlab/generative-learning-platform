@@ -11,15 +11,19 @@ from __future__ import annotations
 
 import os
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-RESET  = "\033[0m"; BOLD = "\033[1m"; RED = "\033[31m"
-GREEN  = "\033[32m"; YELLOW = "\033[33m"; CYAN = "\033[36m"; DIM = "\033[2m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+DIM = "\033[2m"
 
 def _h(t):    return f"{BOLD}{t}{RESET}"
 def _ok(t):   return f"{GREEN}{t}{RESET}"

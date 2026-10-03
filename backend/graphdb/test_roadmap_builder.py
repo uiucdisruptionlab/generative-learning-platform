@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from graphdb.roadmap_builder import build_roadmap_from_graph_data
 
-
 FAKE_GRAPH = {
     "concepts": [
         {"name": "Variables", "description": "Named storage for values"},

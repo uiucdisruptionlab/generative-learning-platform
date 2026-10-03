@@ -38,7 +38,6 @@ All writes use `MERGE`, so re-running the pipeline on the same document is safe 
 | `graph_ingestion.py` | `ingest(chunk, extracted)` — orchestrates a full write for one chunk |
 | `setup_schema.py` | One-time script to create uniqueness constraints — **already run, do not run again** |
 | `test_graph.py` | End-to-end test with fake data and a live verification query |
-| `main.py` | Scratch file used during initial Neo4j connection setup |
 
 ## Setup
 
@@ -63,7 +62,7 @@ The test creates a fake chunk about React Hooks, runs it through `ingest()`, the
 
 ## Integration point
 
-In `main.py` (the ingestion pipeline), call `ingest()` after `create_record()` and before the Pinecone upsert:
+In `ingest_course.py` (the ingestion pipeline), call `ingest()` after `create_record()` and before the Pinecone upsert:
 
 ```python
 from graphdb.graph_ingestion import ingest

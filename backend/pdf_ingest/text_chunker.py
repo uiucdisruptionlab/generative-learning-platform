@@ -1,4 +1,5 @@
-from typing import List, Dict, Any
+from typing import Any
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
@@ -12,11 +13,11 @@ class TextChunker:
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", " ", ""],  
+            separators=["\n\n", "\n", ". ", " ", ""],
             keep_separator=True
         )
 
-    def chunk_texts(self, texts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def chunk_texts(self, texts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Input: List of {'text': str, 'metadata': dict}
         Output: List of {'chunk': str, 'metadata': dict} (with updated metadata for chunk index)
@@ -25,9 +26,9 @@ class TextChunker:
         for i, item in enumerate(texts):
             text = item['text']
             metadata = item['metadata'].copy()
-            
+
             text_chunks = self.splitter.split_text(text)
-            
+
             for j, chunk in enumerate(text_chunks):
                 chunk_metadata = metadata.copy()
                 chunk_metadata['chunk_index'] = j
@@ -39,5 +40,5 @@ class TextChunker:
                 # Avoid printing chunk text directly; some PDFs include characters
                 # that fail on default Windows console encodings.
                 print(f"Chunked element {i + 1}, chunk {j + 1}")
-        
+
         return chunks

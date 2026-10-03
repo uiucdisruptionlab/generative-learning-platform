@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 
@@ -180,7 +181,7 @@ def get_lecture_grouped_concepts(course_id: str) -> list[dict]:
                 existing["chunk_order"] = ch_order
 
     out: list[dict] = []
-    for lid, lec in lectures.items():
+    for lec in lectures.values():
         chunks_sorted = sorted(
             ({"chunk_id": cid, "order": order} for cid, order in lec["_chunks"].items()),
             key=lambda c: (int(c["order"]), str(c["chunk_id"])),

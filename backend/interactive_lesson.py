@@ -12,11 +12,12 @@ import os
 import re
 import time
 import uuid
+from datetime import UTC
 from pathlib import Path
 from typing import Any, Literal
 
-from bedrock.client import create_bedrock_runtime_client
 from lesson_generator import load_lesson_sources
+from llm.client import create_llm_client
 
 MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
@@ -203,7 +204,7 @@ def _clear_lesson_cache_for_persona(student_id: str, persona: dict[str, Any]) ->
             try:
                 cache_file.unlink()
             except OSError as exc:
-                print(f"[dynamic_lesson] failed to remove stale lesson cache {cache_file}: {exc}")
+                print(f"[interactive_lesson] failed to remove stale lesson cache {cache_file}: {exc}")
 
 
 def _learning_style_from_formats(formats: list[str], confidence: str | None) -> str:
@@ -253,7 +254,7 @@ def _apply_profile_updates_from_message(session: dict[str, Any], text: str) -> d
 
     if student_id:
         try:
-            from supabase_local import get_student_profile, get_supabase_client
+            from db.supabase_client import get_student_profile, get_supabase_client
 
             supabase = get_supabase_client()
             current_profile = get_student_profile(student_id, client=supabase) or {}
@@ -270,7 +271,7 @@ def _apply_profile_updates_from_message(session: dict[str, Any], text: str) -> d
             ).eq("id", student_id).execute()
             _clear_lesson_cache_for_persona(student_id, {**persona, **current_profile})
         except Exception as exc:
-            print(f"[dynamic_lesson] profile preference update failed: {exc}")
+            print(f"[interactive_lesson] profile preference update failed: {exc}")
             return None
 
     persona["preferred_formats"] = next_formats
@@ -495,7 +496,7 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 
 
 def _call_converse(system: str, user: str, *, temperature: float = 0.35, max_tokens: int = 4096) -> str:
-    client = create_bedrock_runtime_client(region=AWS_REGION)
+    client = create_llm_client(region=AWS_REGION)
     response = client.converse(
         modelId=MODEL_ID,
         system=[{"text": system}],
@@ -782,7 +783,6 @@ def _persona_block(persona: dict[str, Any]) -> str:
             "major": persona.get("major"),
             "familiarity": persona.get("familiarity"),
             "learning_style": persona.get("learning_style"),
-            "preferred_formats": persona.get("preferred_formats"),
             "hours_per_week": persona.get("hours_per_week"),
             "preferred_formats": persona.get("preferred_formats"),
             "interests": persona.get("interests"),
@@ -1074,9 +1074,9 @@ def _resolve_video_widget_payload(
         try:
             results = search_videos(q, max_results=5)
         except Exception as exc:
-            print(f"[dynamic_lesson] YouTube search for video widget failed: {exc}")
+            print(f"[interactive_lesson] YouTube search for video widget failed: {exc}")
     else:
-        print(f"[dynamic_lesson] Skipping YouTube search: videos not in learner's preferred formats.")
+        print("[interactive_lesson] Skipping YouTube search: videos not in learner's preferred formats.")
 
     if results:
         results = sorted(results, key=lambda v: _video_score(q, v), reverse=True)
@@ -1154,7 +1154,7 @@ interaction.payload rules:
 - type "free_response": payload {"question": "...", "reference_answer": "... (2-3 sentence model answer the student can compare against)"}.
 - type "video": payload {"search_query": "string (optional — specific keywords; backend also uses lecture context)", "reason": "string (one line why this helps)", "url": "optional full https://www.youtube.com/watch?v=... if you know a specific video" }.
 
-IMPORTANT: If the learner asks to watch a video, see a clip, or wants something explained on YouTube, use type "video".
+If the learner asks to watch a video, see a clip, or wants something explained on YouTube, use type "video".
 Ground your search_query in what you just taught and what they asked — do not use generic course titles alone.
 The backend will run a real YouTube search merged with session context (or open your url). Do not invent watch URLs unless you are certain they exist.
 
@@ -1164,12 +1164,12 @@ Grounding rule:
 
 SOURCE EXCERPTS below are retrieved for THIS moment (last segment + their message). Use them to stay on-topic.
 
-Activity selection — ALWAYS generate an activity. mcq is the default and should be used in most cases:
-- mcq: the default. Use it for factual checks, definitions, comparisons, and examples. When in doubt, use mcq.
-- flashcards: only when there are 3 or more distinct terms or relationships to reinforce simultaneously.
-- free_response: use sparingly — at most twice per lesson. Only choose it when an open-ended explanation adds depth that mcq genuinely cannot capture.
-- video: only when the learner explicitly asks to watch a clip or video.
-- none: ONLY if the learner's reflection is a detailed multi-sentence explanation covering ALL key points. A brief reply is never enough. If in doubt, use mcq.
+Activity selection. Pick a type from ALLOWED_ACTIVITY_TYPES. Follow each reflection with a check unless the learner has already shown they understand, because the activities are how the session measures mastery:
+- mcq: the usual choice, for factual checks, definitions, comparisons, and examples.
+- flashcards: when there are 3 or more distinct terms or relationships to reinforce together.
+- free_response: when an open-ended explanation shows depth an mcq cannot. The session allows two per lesson.
+- video: when the learner asks to watch a clip or video.
+- none: when the reflection is a detailed, multi-sentence explanation that covers the key points of the segment.
 Honour LEARNER preferred_formats when selecting activity type — if the learner lists "quizzes" or "flashcards", prefer those types.
 Keep assistant wording and examples aligned with LEARNER interests/goals; avoid generic examples when profile gives specifics."""
     fr_count = sum(
@@ -1659,8 +1659,8 @@ def _write_srs_for_concepts(
     activity: dict[str, Any] | None = None,
 ) -> None:
     """Write per-concept SRS records. Non-fatal on any error."""
+    from db.supabase_client import get_supabase_client
     from srs import upsert_srs_record
-    from supabase_local import get_supabase_client
 
     persona = session["sources"].get("persona") or {}
     student_id = str(persona.get("student_id") or "")
@@ -1694,7 +1694,7 @@ def _write_srs_for_concepts(
             _cname = _name_map.get(cid) or cid[:12]
             print(f"[SRS] ✓ wrote  {_cname!r}  score={score}/5  lesson={effective_lesson_id}")
     except Exception as exc:
-        print(f"[dynamic_lesson] SRS write failed (non-fatal): {exc}")
+        print(f"[interactive_lesson] SRS write failed (non-fatal): {exc}")
 
 
 def _get_lesson_avg_score(student_id: str, lesson_id: str, client: Any) -> float | None:
@@ -1711,7 +1711,7 @@ def _get_lesson_avg_score(student_id: str, lesson_id: str, client: Any) -> float
         scores = [r["score"] for r in (resp.data or []) if r.get("score") is not None]
         return sum(scores) / len(scores) if scores else None
     except Exception as exc:
-        print(f"[dynamic_lesson] gate score query failed: {exc}")
+        print(f"[interactive_lesson] gate score query failed: {exc}")
         return None
 
 
@@ -1734,7 +1734,7 @@ def _get_lesson_session_score(student_id: str, lesson_id: str, client: Any) -> f
             return float(rows[0]["score"])
         return None
     except Exception as exc:
-        print(f"[dynamic_lesson] gate session_score query failed: {exc}")
+        print(f"[interactive_lesson] gate session_score query failed: {exc}")
         return None
 
 
@@ -1777,7 +1777,7 @@ def _check_lesson_gate(
 def _load_lesson_roadmap_for_student(student_id: str) -> dict[str, Any] | None:
     """Load the cached lesson roadmap for this student from Supabase roadmap_cache."""
     try:
-        from supabase_local import get_supabase_client
+        from db.supabase_client import get_supabase_client
         client = get_supabase_client()
         resp = (
             client.table("roadmap_cache")
@@ -1796,7 +1796,7 @@ def _load_lesson_roadmap_for_student(student_id: str) -> dict[str, Any] | None:
             return roadmap
         return None
     except Exception as exc:
-        print(f"[dynamic_lesson] roadmap load failed: {exc}")
+        print(f"[interactive_lesson] roadmap load failed: {exc}")
         return None
 
 
@@ -1842,12 +1842,14 @@ Schema:
 }
 For mcq payload: {"question":"string","options":["4 strings"],"correct_index":0-3,"explanation":"string"}
 For free_response payload: {"question":"string","reference_answer":"string (2-3 sentence model answer)"}
-Choose mcq when last_score <= 2, free_response when last_score >= 3."""
+Produce the widget type named in widget_type."""
 
+    wtype = "mcq" if last_score <= 2 else "free_response"
     user = json.dumps({
         "concept_name": concept_name,
         "concept_description": description,
         "last_score": last_score,
+        "widget_type": wtype,
         "review_index": concept_index + 1,
         "review_total": total,
         "persona": _persona_block(session["sources"].get("persona") or {}),
@@ -1858,9 +1860,6 @@ Choose mcq when last_score <= 2, free_response when last_score >= 3."""
         data = _parse_json_object(raw)
         recap = str(data.get("recap") or "").strip() or f"Let's review: {concept_name}."
         widget_raw = data.get("widget") or {}
-        wtype = str(widget_raw.get("type") or "mcq").lower()
-        if wtype not in ("mcq", "free_response"):
-            wtype = "mcq" if last_score <= 2 else "free_response"
         wpayload = widget_raw.get("payload") if isinstance(widget_raw.get("payload"), dict) else {}
         return recap, {"type": wtype, "payload": wpayload}
     except Exception:
@@ -1893,7 +1892,7 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
     # --- Gate check (hard enforcement — own try/except so errors are visible) ---
     if student_id:
         try:
-            from supabase_local import get_supabase_client
+            from db.supabase_client import get_supabase_client
             _gate_client = get_supabase_client()
             _gate_roadmap = _load_lesson_roadmap_for_student(student_id)
             if _gate_roadmap:
@@ -1922,8 +1921,8 @@ def start_session(lesson_id: str, persona_id: str, course: str | None) -> dict[s
     # --- Overdue review check (non-fatal) ---
     if student_id:
         try:
+            from db.supabase_client import get_supabase_client
             from srs import get_due_srs_records
-            from supabase_local import get_supabase_client
             client = get_supabase_client()
 
             roadmap = _load_lesson_roadmap_for_student(student_id)
@@ -2359,12 +2358,13 @@ def _maybe_save_session(session: dict[str, Any]) -> None:
     try:
         _save_session_to_db(session)
     except Exception as exc:
-        print(f"[dynamic_lesson] session persist failed (non-fatal): {exc}")
+        print(f"[interactive_lesson] session persist failed (non-fatal): {exc}")
 
 
 def _save_session_to_db(session: dict[str, Any]) -> None:
-    from datetime import datetime, timezone
-    from supabase_local import get_supabase_client
+    from datetime import datetime
+
+    from db.supabase_client import get_supabase_client
 
     sources = session["sources"]
     persona = sources.get("persona") or {}
@@ -2386,7 +2386,7 @@ def _save_session_to_db(session: dict[str, Any]) -> None:
 
     started_ts = session.get("created_at")
     started_at = (
-        datetime.fromtimestamp(started_ts, tz=timezone.utc).isoformat()
+        datetime.fromtimestamp(started_ts, tz=UTC).isoformat()
         if isinstance(started_ts, (int, float))
         else None
     )

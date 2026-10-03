@@ -7,14 +7,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from bedrock.embedder import BedrockEmbedder
 from concept_extractor import extract_concepts_from_chunk
 from graphdb.graph_ingestion import ingest as ingest_graph
+from llm.embedder import Embedder
 from pc_client.client import PineconeClient
 from pc_client.models.chunks import ChunkMetadata, CourseChunk
-from unstructured.pdf_text_extractor import PDFTextExtractor
-from unstructured.text_chunker import TextChunker
-
+from pdf_ingest.pdf_text_extractor import PDFTextExtractor
+from pdf_ingest.text_chunker import TextChunker
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -61,7 +60,7 @@ def ingest_pdf(
     chunks = chunker.chunk_texts(texts)
     print(f"[{offering_id}] Created {len(chunks)} chunks")
 
-    embedder = None if graph_only else BedrockEmbedder()
+    embedder = None if graph_only else Embedder()
     pinecone_client = None
     if not graph_only:
         pinecone_client = PineconeClient(

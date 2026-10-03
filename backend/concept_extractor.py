@@ -3,7 +3,7 @@ import os
 import re
 from typing import Any
 
-from bedrock.client import create_bedrock_runtime_client
+from llm.client import create_llm_client
 
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 BEDROCK_MODEL_ID = os.getenv(
@@ -246,7 +246,7 @@ def extract_concepts_from_chunk(chunk: Any) -> dict[str, Any]:
         "metadata": metadata,
     }
 
-    client = create_bedrock_runtime_client(region=AWS_REGION)
+    client = create_llm_client(region=AWS_REGION)
     response = client.converse(
         modelId=BEDROCK_MODEL_ID,
         system=[{"text": SYSTEM_PROMPT}],

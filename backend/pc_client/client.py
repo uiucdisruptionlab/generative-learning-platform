@@ -1,7 +1,11 @@
 from __future__ import annotations
-from pinecone import Pinecone, FetchResponse
-from typing import Iterable, List, Optional, Tuple, Any
-from .models.chunks import CourseChunk, ChunkMetadata
+
+from collections.abc import Iterable
+from typing import Any
+
+from pinecone import FetchResponse, Pinecone
+
+from .models.chunks import ChunkMetadata, CourseChunk
 
 
 class PineconeClient:
@@ -14,41 +18,41 @@ class PineconeClient:
     def __init__(self,
         api_key: str,
         index_name: str,
-        namespace: Optional[str] = None,
+        namespace: str | None = None,
     ):
         self._pc = Pinecone(api_key=api_key)
         self._index = self._pc.Index(index_name)
         self.namespace = namespace
 
     def _effective_namespace(self,
-        namespace: Optional[str]
-    ) -> Optional[str]:
+        namespace: str | None
+    ) -> str | None:
         """Set namespace within client."""
-      
+
         return namespace if namespace is not None else self.namespace
 
-    def create_record(self, 
-        id: str, 
-        embeddings: List[float], 
+    def create_record(self,
+        id: str,
+        embeddings: list[float],
         metadata: ChunkMetadata
-    ) -> Tuple[str, List[float], dict]:
-        
+    ) -> tuple[str, list[float], dict]:
+
         """Create the Pinecone Chunk in the correct format for upserts."""
-        
+
         chunk = CourseChunk(id=id, values=embeddings, metadata=metadata)
         return chunk.to_pinecone_record()
 
-    
+
     def upsert(self,
-        records: Iterable[Tuple[str, List[float], dict]],
-        namespace: Optional[str] = None,
+        records: Iterable[tuple[str, list[float], dict]],
+        namespace: str | None = None,
         batch_size: int = 50,
     ) -> None:
 
         """Upsert records in batches."""
 
         ns = self._effective_namespace(namespace)
-        batch: List[Tuple[str, List[float], dict]] = []
+        batch: list[tuple[str, list[float], dict]] = []
 
         for record in records:
             batch.append(record)
@@ -59,12 +63,12 @@ class PineconeClient:
         if batch:
             self._index.upsert(vectors=batch, namespace=ns)
 
-    
+
     def fetch_by_id(self,
-        ids: List[str],
-        namespace: Optional[str] = None,
+        ids: list[str],
+        namespace: str | None = None,
     ) -> FetchResponse:
-        
+
         """Search the index with a specified ID."""
 
         ns = self._effective_namespace(namespace)
@@ -72,12 +76,12 @@ class PineconeClient:
 
     def query(
         self,
-        vector: List[float],
+        vector: list[float],
         top_k: int = 10,
-        namespace: Optional[str] = None,
+        namespace: str | None = None,
         include_metadata: bool = True,
     ) -> Any :
-        
+
         """Search the index by semantic query."""
 
         ns = self._effective_namespace(namespace)

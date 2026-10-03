@@ -3,7 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 from urllib.parse import quote
 
 import boto3
@@ -84,7 +85,7 @@ class OpenAICompatClient:
             except Exception:
                 parsed_body = {}
 
-        # Embeddings compatibility used by BedrockEmbedder.
+        # Embeddings compatibility used by Embedder.
         if str(modelId).startswith("amazon.titan-embed-text"):
             text = str((parsed_body or {}).get("inputText", ""))
             embed_payload = {
@@ -142,7 +143,7 @@ class OpenAICompatClient:
 
         cfg = inferenceConfig or {}
         text = self._chat_completions(
-            model=self._model_for_converse(modelId),
+            model=self._model_for_converse(),
             messages=chat_messages or [{"role": "user", "content": ""}],
             max_tokens=int(cfg.get("maxTokens", 1024)),
             temperature=float(cfg.get("temperature", 0.0)),
@@ -254,7 +255,7 @@ def _has_bedrock_api_key() -> bool:
 
 
 
-def create_bedrock_runtime_client(region: str | None = None):
+def create_llm_client(region: str | None = None):
     region = region or os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 
     if _has_standard_aws_credentials():

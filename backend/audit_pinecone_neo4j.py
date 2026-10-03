@@ -262,7 +262,7 @@ def main() -> None:
               f"({_err(str(lec_count))} lecture(s) incomplete, "
               f"{_err(str(chunk_count))} chunk(s) missing)\n")
 
-        col_lec = max(len(l) for l in by_lec) + 2
+        col_lec = max(len(lec_id) for lec_id in by_lec) + 2
         lec_hdr = f"  Lecture{' '*(col_lec-7)}  Missing chunks  Chunk IDs"
         print(f"  {_h(lec_hdr)}")
         print(f"  {'-'*(col_lec+40)}")

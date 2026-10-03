@@ -11,6 +11,9 @@ export type Persona = {
   learningStyle: string
   experienceLevel: 'beginner' | 'intermediate' | 'advanced'
   primaryRoadmapPath: string
+  displayName?: string
+  studentId?: string
+  avatarUrl?: string
 }
 
 export const PERSONAS: Record<string, Persona> = {

@@ -1,15 +1,15 @@
 from dataclasses import dataclass
-from typing import Optional
+
 
 @dataclass
 class ChunkMetadata:
 
-    offering_id : str # same as namespace title; just here for debugging purposes 
-    source_type : str # for filtering purposes i.e user could ask for something specifically mentioned in the slides 
-    topic : str # for topic filtering to bias retrieval 
+    offering_id : str # same as namespace title; just here for debugging purposes
+    source_type : str # for filtering purposes i.e user could ask for something specifically mentioned in the slides
+    topic : str # for topic filtering to bias retrieval
     text : str # passed into embeddings model
     chunk_number : int # to retrieve adjacent chunks for more context
-    course_id: Optional[str] = None # explicit course id for graph-scoped roadmaps
+    course_id: str | None = None # explicit course id for graph-scoped roadmaps
 
     def validate_data(self):
 
@@ -43,7 +43,7 @@ class ChunkMetadata:
 @dataclass
 class CourseChunk:
     id : str # chunk id, i.e lec03_chunk_{chunk_number}
-    values : list[float] # vector embeddings for chunk 
+    values : list[float] # vector embeddings for chunk
     metadata : ChunkMetadata # metadata object
 
     def validate_data(self):
@@ -58,7 +58,7 @@ class CourseChunk:
         self.validate_data()
 
         return (
-            self.id, 
+            self.id,
             self.values,
             self.metadata.to_dict()
         )

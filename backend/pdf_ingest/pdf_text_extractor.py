@@ -1,8 +1,10 @@
 import os
-from typing import List, Dict, Any
+from typing import Any
+
 import unstructured_client
-from unstructured_client.models import operations, shared
 from pypdf import PdfReader
+from unstructured_client.models import operations, shared
+
 
 class PDFTextExtractor:
     """
@@ -18,7 +20,7 @@ class PDFTextExtractor:
             else None
         )
 
-    def extract_texts(self, pdf_path: str) -> List[Dict[str, Any]]:
+    def extract_texts(self, pdf_path: str) -> list[dict[str, Any]]:
         """
         Parse PDF and extract text elements.
         Returns list of dicts: {'text': str, 'metadata': dict}
@@ -54,9 +56,9 @@ class PDFTextExtractor:
         res = self.unstructured_client.general.partition(request=req)
         texts = []
         for element in res.elements:
-            element_dict = element  
+            element_dict = element
             text = element_dict.get('text', '').strip()
-            if text:  
+            if text:
                 texts.append({
                     'text': text,
                     'metadata': element_dict.get('metadata', {})

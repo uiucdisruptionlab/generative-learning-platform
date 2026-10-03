@@ -4,7 +4,7 @@ import type {
   HomeRoadmapConcept,
   HomeRoadmapOutcome,
   HomeRoadmapStatus,
-} from '../data/homeRoadmapPreview'
+} from '../data/roadmapTypes'
 
 type LearningRoadmapProps = {
   compact?: boolean

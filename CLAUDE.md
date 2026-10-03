@@ -1,53 +1,23 @@
-
 ## Project Overview
 
-**Generative Learning Platform (GLP)** - An AI-enhanced educational platform for personalized learning paths, currently focused on Financial Accounting content. The project is in early development with a functional frontend and sample backend code demonstrating AWS Bedrock integration.
+**Generative Learning Platform (GLP)** - An AI-enhanced educational platform for personalized learning paths, currently focused on Financial Accounting content.
 
-## Development Commands
+- `frontend/` - React + Vite + Tailwind app. See `frontend/CLAUDE.md`.
+- `backend/` - FastAPI app that builds roadmaps and generates lessons. See `backend/CLAUDE.md`.
 
-All commands should be run from the `frontend/` directory:
+## Cross-workspace contract
 
-```bash
-cd frontend
-npm install          # Install dependencies
-npm run dev          # Start development server (http://localhost:5173)
-```
+The frontend talks to the backend over HTTP only, at `VITE_API_URL` (default `http://localhost:8000`). The backend's CORS allowlist accepts `http://localhost:5173` and `http://127.0.0.1:5173` only, so the Vite dev server stays on port 5173.
 
-**Note**: No backend server exists yet. All API calls are mocked in `frontend/src/api/`.
+When an endpoint's request or response shape changes, update the matching TypeScript types in `frontend/src/api/` in the same change. Nothing generates them.
 
-## Design System
+## Environment Variables
 
-Custom Tailwind configuration in `tailwind.config.js`:
+`.env` files hold service credentials (AWS, OpenAI, Pinecone, Neo4j, Supabase, YouTube). Never commit them.
 
-- **Primary Color**: Forest green (`#2c5926`) - used for primary actions
-- **Canvas Green**: `#287D3C` - Canvas LMS brand color
-- **Secondary**: Warm yellow/amber tones for highlights
-- **Accent**: Burnt orange (`#cc5500`) for CTAs
-- **Typography**: DM Sans (headings), Inter/Lexend (body)
-- **Icons**: Material Symbols Outlined from Google Fonts
-- **Dark Mode**: Class-based (`dark:` prefix), toggled via AppLayout
+## Living documentation
 
-Use semantic color names (`bg-primary`, `text-canvas-green`) rather than arbitrary values to maintain consistency.
-
-
-
-## Important Notes for Development
-
-1. **No Backend**: All API calls in `src/api/` are mocked. When building the backend, maintain the same TypeScript interfaces but replace mock implementations with real HTTP calls.
-
-2. **Module Pattern**: Use `IncomeStatementPage.tsx` as a template when creating new learning modules. Maintain consistent structure: concept explanation, quiz, practice problems, resources.
-
-4. **TypeScript Strict Mode**: Enabled in `tsconfig.json`. Unused variables will cause build errors. Keep code clean.
-
-5. **Vite Build Tool**: Very fast HMR. Uses ES modules. No webpack config needed. Port 5173 by default.
-
-
-7. **Learning Roadmap Data**: Hardcoded in `LearningRoadmap.tsx`. Should be moved to API/database when backend is implemented.
-
-8. **Environment Variables**: `.env` contains AWS credentials. Never commit this file. Create `.env.example` for team reference.
-
-## Workflow
-
-1. Whenever making changes in the frontend, you **MUST** make sure to ALWAYS follow the design theme.
-
-2. If making changes in the backend, make sure to run the relevant command and verify the output.
+This project uses per-folder CLAUDE.md files. After any session where you introduce a new
+module, dependency, or architectural convention, update the CLAUDE.md closest to where the
+change lives - not this file unless the change is project-wide. Write what a future agent
+could not derive from reading the code: rules, boundaries, ownership decisions.

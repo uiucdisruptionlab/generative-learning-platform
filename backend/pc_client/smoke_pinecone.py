@@ -1,7 +1,7 @@
-from dotenv import load_dotenv
 import os
 
 from client import PineconeClient
+from dotenv import load_dotenv
 from models.chunks import ChunkMetadata
 
 # --------------- Init ------------------------

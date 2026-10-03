@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -41,7 +41,7 @@ def run_sm2(score: int | float, previous: dict[str, Any] | None = None) -> dict[
         else:
             interval_days = max(1, round(max(old_interval, 1) * ease_factor))
 
-    reviewed_at = datetime.now(timezone.utc)
+    reviewed_at = datetime.now(UTC)
     next_review_at = reviewed_at + timedelta(days=interval_days)
 
     return {
@@ -134,7 +134,7 @@ def set_roadmap_position(
     row: dict[str, Any] = {
         "student_id": student_id,
         "current_index": max(0, int(current_index)),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
     if course_id:
         row["course_id"] = course_id
@@ -223,7 +223,7 @@ def get_due_srs_records(
     *,
     client: Client,
 ) -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     response = (
         client.table("srs_records")
         .select("*")
@@ -241,7 +241,7 @@ def get_upcoming_srs_records(
     days: int = 7,
     client: Client,
 ) -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     end = now + timedelta(days=max(0, int(days)))
     response = (
         client.table("srs_records")
@@ -319,7 +319,7 @@ def advance_roadmap_progress(
 
     course_progress["completed_lessons"] = completed
     course_progress["current_lesson_id"] = lesson_id
-    course_progress["updated_at"] = datetime.now(timezone.utc).isoformat()
+    course_progress["updated_at"] = datetime.now(UTC).isoformat()
     all_progress[course] = course_progress
     llm_profile["roadmap_progress"] = all_progress
 

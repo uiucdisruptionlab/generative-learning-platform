@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
@@ -43,8 +43,8 @@ def get_supabase_client() -> Client:
 def get_student_profile(
     student_id: str,
     *,
-    client: Optional[Client] = None,
-) -> Optional[dict[str, Any]]:
+    client: Client | None = None,
+) -> dict[str, Any] | None:
     """Return one student row (all columns) or None if not found."""
     supabase = client or get_supabase_client()
     response = (
@@ -61,7 +61,7 @@ def get_student_profile(
 def insert_content_item(
     lesson: dict[str, Any],
     *,
-    client: Optional[Client] = None,
+    client: Client | None = None,
 ) -> str:
     """
     Insert a lesson-like dict into content_items. Required: title.
@@ -101,7 +101,7 @@ def insert_recommendation(
     score: float,
     explanation: str,
     *,
-    client: Optional[Client] = None,
+    client: Client | None = None,
 ) -> dict[str, Any]:
     """Insert one recommendation row; channel and status are fixed for the knowledge graph."""
     supabase = client or get_supabase_client()
@@ -125,7 +125,7 @@ def insert_content_interaction(
     content_id: str,
     interaction_type: str,
     *,
-    client: Optional[Client] = None,
+    client: Client | None = None,
 ) -> dict[str, Any]:
     """Log a student action on a content item."""
     supabase = client or get_supabase_client()
@@ -144,7 +144,7 @@ def insert_content_interaction(
 def get_recommendations(
     student_id: str,
     *,
-    client: Optional[Client] = None,
+    client: Client | None = None,
 ) -> list[dict[str, Any]]:
     """All recommendations for a student with nested content_items, highest score first."""
     supabase = client or get_supabase_client()
@@ -161,7 +161,7 @@ def get_recommendations(
 def clear_recommendations(
     student_id: str,
     *,
-    client: Optional[Client] = None,
+    client: Client | None = None,
 ) -> None:
     """Delete every recommendation row for this student (test resets)."""
     supabase = client or get_supabase_client()
@@ -171,7 +171,7 @@ def clear_recommendations(
 def get_overdue_reviews(
     student_id: str,
     *,
-    client: Optional[Client] = None,
+    client: Client | None = None,
 ) -> list[dict[str, Any]]:
     """
     SRS rows due for review: next_review_at <= now (UTC), for this student.
@@ -179,7 +179,7 @@ def get_overdue_reviews(
     Empty list => session can start with new content; non-empty => review mode.
     """
     supabase = client or get_supabase_client()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     try:
         # NULL next_review_at is excluded: (NULL <= now) is unknown in SQL.
         response = (
@@ -215,7 +215,7 @@ def _demo_overdue_reviews() -> None:
         "concept_id", demo_concept_id
     ).execute()
 
-    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     row = {
         "student_id": alice,
         "concept_id": demo_concept_id,
