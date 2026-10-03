@@ -8,7 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from bedrock.embedder import BedrockEmbedder
-from concept_extractor import extract_concepts_from_chunk
+from backend.ingestion.concept_extractor import extract_concepts_from_chunk
 from graphdb.graph_ingestion import ingest as ingest_graph
 from pc_client.client import PineconeClient
 from pc_client.models.chunks import ChunkMetadata, CourseChunk

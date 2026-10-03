@@ -7,7 +7,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from unstructured.pdf_text_extractor import PDFTextExtractor
 from unstructured.text_chunker import TextChunker
 from bedrock.embedder import BedrockEmbedder
-from concept_extractor import extract_concepts_from_chunk
+from backend.ingestion.concept_extractor import extract_concepts_from_chunk
 from graphdb.graph_ingestion import ingest as ingest_graph
 from pc_client.client import PineconeClient
 from pc_client.models.chunks import ChunkMetadata, CourseChunk

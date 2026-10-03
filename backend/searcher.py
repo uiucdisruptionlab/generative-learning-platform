@@ -1,3 +1,11 @@
+"""
+One-off Pinecone query smoke test. Hard-codes `"What is the representation space?"`. 
+Useful for dev, not used at runtime.
+
+
+TODO: do we really need this? could we get rid of it
+"""
+
 import os
 from pinecone import Pinecone
 from dotenv import load_dotenv

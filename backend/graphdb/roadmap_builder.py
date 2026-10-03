@@ -1,3 +1,11 @@
+"""
+Converting the NodeJS information into lectures
+-- questions: is this what we're feeding into canvas
+-- what exactly does the output look like
+-- how much of this is necessary
+-- can we rename some stuff
+"""
+
 from __future__ import annotations
 
 import json

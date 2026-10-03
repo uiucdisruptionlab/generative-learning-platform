@@ -1,9 +1,13 @@
+"""
+Inputting a new chunk (lecture) into the graph database
+"""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pc_client.models.chunks import CourseChunk
+# chunk contains: id (lec03_chunk_{chunk_number}), values (vector embedding), metadata
 from graphdb.neo4j_client import (
     create_course,
     get_all_concepts,
