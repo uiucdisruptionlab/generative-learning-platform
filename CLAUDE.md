@@ -15,6 +15,14 @@ When an endpoint's request or response shape changes, update the matching TypeSc
 
 `.env` files hold service credentials (AWS, OpenAI, Pinecone, Neo4j, Supabase, YouTube). Never commit them.
 
+## Pull requests and issues
+
+Every pull request body follows `.github/pull_request_template.md`: fill in all four sections and keep the headings. GitHub applies the template only when a pull request is opened in the browser, so when opening one from the command line, pass the template as the body and fill it in. Every issue follows `.github/ISSUE_TEMPLATE.md` in the same way.
+
+## CI
+
+`.github/workflows/lint.yml` runs on every pull request and on pushes to `main`: Ruff on `backend/`, and ESLint plus `tsc --noEmit` on `frontend/`. Run the same commands locally before pushing (`ruff check .`, `npm run lint`, `npm run typecheck`). The Ruff version is pinned in the workflow; bump it there when upgrading.
+
 ## Living documentation
 
 This project uses per-folder CLAUDE.md files. After any session where you introduce a new
