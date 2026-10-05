@@ -1,3 +1,4 @@
+
 # Database (Supabase)
 
 `supabase_client.py` is the only module that creates the Supabase client; everything else imports `get_supabase_client` and `get_student_profile` from `db.supabase_client`. It loads the repo-root `.env` first and then `backend/.env`, which overrides it.
