@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
-import requests
 from typing import Any
+
+import requests
 
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 

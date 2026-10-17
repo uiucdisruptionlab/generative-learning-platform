@@ -5,24 +5,17 @@ produces the output lesson information
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import re
-from pathlib import Path
 from typing import Any
 
+from db.supabase_client import get_student_profile, get_supabase_client
+from llm.client import create_llm_client
 from youtube.client import search_videos
 
-_BACKEND_DIR = Path(__file__).resolve().parent
-_sc_path = _BACKEND_DIR / "supabase" / "supabase_client.py"
-_spec = importlib.util.spec_from_file_location("glp_supabase_client", _sc_path)
-if _spec is None or _spec.loader is None:
-    raise RuntimeError(f"Cannot load supabase client from {_sc_path}")
-_glp_sc = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_glp_sc)
-get_student_profile = _glp_sc.get_student_profile
-get_supabase_client = _glp_sc.get_supabase_client
+AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 
 COURSE_NAMESPACES: dict[str, str] = {
     "accounting": "15.501_Transcripts",
@@ -30,6 +23,60 @@ COURSE_NAMESPACES: dict[str, str] = {
     "financing": "11.437_Transcripts",
     "BIS512": "BIS512",
 }
+
+SYSTEM_PROMPT = """
+You are an expert educational content creator. Your job is to generate a personalized lesson for a student based on:
+- The lesson topic and concepts
+- Raw source material (lecture chunks)
+- The student's learner profile
+- Relevant YouTube videos
+
+Return JSON only. No markdown. No prose outside JSON.
+
+Output schema:
+{
+  "lesson_id": "string",
+  "title": "string",
+  "overview": "string (2-3 sentences introducing the lesson and why it matters)",
+  "steps": [
+    {
+      "step_number": 1,
+      "title": "string",
+      "type": "concept" | "example" | "summary",
+      "content": "string (rich explanation, tailored to the learner profile)"
+    }
+  ],
+  "videos": [
+    {
+      "title": "string",
+      "url": "string",
+      "channel": "string",
+      "thumbnail": "string",
+      "reason": "string (one sentence on why this video is relevant)"
+    }
+  ],
+  "questions": [
+    {
+      "type": "multiple_choice" | "fill_in_the_blank",
+      "question": "string",
+      "options": ["string"] (only for multiple_choice, 4 options),
+      "answer": "string",
+      "explanation": "string (brief explanation of why this is the correct answer)"
+    }
+  ]
+}
+
+Rules:
+- Tailor the depth, tone, and structure of every step to the learner profile provided.
+- If PRIOR PERFORMANCE data is present, follow its directive: adjust difficulty, depth, and remediation accordingly.
+- Personalize examples and analogies to the learner's interests and goals/career direction whenever relevant.
+- Steps flow logically: core concepts first, then examples, then a summary. Write 3 steps.
+- Write 3 questions that test understanding rather than recall, mixing multiple choice and fill in the blank.
+- Use only concepts and facts present in the source material.
+- For fill_in_the_blank questions, use ___ to mark the blank in the question string.
+- The "options" field appears only for multiple_choice questions.
+- This is a summary lesson, not a textbook: keep the overview and each step short.
+""".strip()
 
 
 def _normalize_profile_to_persona(profile: dict[str, Any], *, course_fallback: str | None) -> dict[str, Any]:
@@ -439,7 +486,7 @@ def _parse_json(raw: str) -> dict[str, Any]:
 def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | None = None) -> dict[str, Any]:
     """
     Load all sources needed for an interactive lesson session: persona, roadmap lesson,
-    Pinecone chunks, YouTube videos, and SRS context. Used by dynamic_lesson.py.
+    Pinecone chunks, YouTube videos, and SRS context. Used by interactive_lesson.py.
     """
     persona = _load_persona_from_supabase(persona_id, course_override=course_override)
     course = course_override or persona.get("course", "accounting")
@@ -458,9 +505,9 @@ def load_lesson_sources(lesson_id: str, persona_id: str, course_override: str | 
                 if isinstance(roadmap, str):
                     roadmap = json.loads(roadmap)
                 if isinstance(roadmap, dict):
-                    for l in roadmap.get("lessons", []):
-                        if l.get("lesson_id") == lesson_id:
-                            lesson = l
+                    for candidate in roadmap.get("lessons", []):
+                        if candidate.get("lesson_id") == lesson_id:
+                            lesson = candidate
                             break
         except Exception as exc:
             print(f"[lesson_generator] Supabase roadmap lookup failed: {exc}")
@@ -608,7 +655,7 @@ def generate_lesson(lesson_id: str, persona_id: str, course_override: str | None
 
     prompt = _build_prompt(lesson, chunks, persona, videos, srs_context)
 
-    client = create_bedrock_runtime_client(region=AWS_REGION)
+    client = create_llm_client(region=AWS_REGION)
     response = client.converse(
         modelId=BEDROCK_MODEL_ID,
         system=[{"text": SYSTEM_PROMPT}],

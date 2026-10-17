@@ -7,9 +7,10 @@ An AI-powered educational platform that ingests course documents, builds vector 
 ```
 generative-learning-platform/
 ├── backend/                  # Python ingestion pipeline and graph layer
-│   ├── main.py               # Pipeline entry point
-│   ├── unstructured/         # PDF extraction and text chunking
-│   ├── bedrock/              # AWS Bedrock embedding generation
+│   ├── server.py             # FastAPI app
+│   ├── ingestion/ingest_course.py  # Ingestion entry point
+│   ├── pdf_ingest/           # PDF extraction and text chunking
+│   ├── llm/                  # LLM and embedding client (Bedrock or OpenAI)
 │   ├── pc_client/            # Pinecone client and data models
 │   └── graphdb/              # Neo4j knowledge graph layer
 └── frontend/                 # React frontend
@@ -23,19 +24,19 @@ The pipeline lives in `backend/` and runs top to bottom for each document:
 PDF file
   │
   ▼
-PDFTextExtractor          (unstructured/)
+PDFTextExtractor          (pdf_ingest/)
   Calls the Unstructured API with a VLM strategy (GPT-4o).
   Splits the document per page and returns a list of
   { text, metadata } dicts.
   │
   ▼
-TextChunker               (unstructured/)
+TextChunker               (pdf_ingest/)
   Uses LangChain's RecursiveCharacterTextSplitter.
   Produces overlapping chunks of ~500 characters,
   adding chunk_index and page_number to each chunk's metadata.
   │
   ▼
-BedrockEmbedder           (bedrock/)
+Embedder                  (llm/)
   Calls AWS Bedrock (amazon.titan-embed-text-v2:0).
   Returns a 1536-dimensional float vector for each chunk.
   │
@@ -82,13 +83,13 @@ NEO4J_PASSWORD=...
 NEO4J_DATABASE=...
 ```
 
-**Process a single PDF:**
+**Ingest a folder of course PDFs:**
 ```bash
 cd backend
-python main.py
+python -m ingestion.ingest_course --course-id BIS512 --namespace BIS512 --folder sample_data/BIS512 --enable-graph-ingestion
 ```
 
-The target file and folder paths are set at the bottom of `main.py`.
+Run `python -m ingestion.ingest_course --help` for the other options.
 
 ## Knowledge graph
 

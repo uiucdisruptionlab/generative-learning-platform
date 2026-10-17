@@ -17,6 +17,7 @@ env/
 
 # Ingestion artifacts
 backend/sample_data/
+backend/pdf_ingest/output_files/
 backend/logs/
 backend/.ingest_state.json
 

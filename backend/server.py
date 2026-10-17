@@ -5,9 +5,10 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -15,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from bedrock.client import create_bedrock_runtime_client
+from llm.client import create_llm_client
 
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -132,13 +133,19 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: List[Message]
-    profile: Dict[str, Any]
+    messages: list[Message]
+    profile: dict[str, Any]
+
+
+class LessonChatRequest(BaseModel):
+    lesson_id: str
+    persona: str = "charles"
+    messages: list[Message] = []
 
 
 class ChatResponse(BaseModel):
     message: str
-    profile: Dict[str, Any]
+    profile: dict[str, Any]
     done: bool
 
 
@@ -146,11 +153,11 @@ class StudentUpdateRequest(BaseModel):
     name: str | None = None
     academic_level: str | None = None
     major_or_field: str | None = None
-    learning_goals: Dict[str, Any] | None = None
-    interests: List[str] | None = None
+    learning_goals: dict[str, Any] | None = None
+    interests: list[str] | None = None
     weekly_hours: float | int | None = None
-    preferred_formats: List[str] | None = None
-    llm_profile: Dict[str, Any] | None = None
+    preferred_formats: list[str] | None = None
+    llm_profile: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +169,8 @@ def looks_like_done(text: str) -> bool:
     return any(re.search(p, lower) for p in TERMINATION_PATTERNS)
 
 
-def normalized_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
-    base: Dict[str, Any] = {
+def normalized_updates(updates: dict[str, Any]) -> dict[str, Any]:
+    base: dict[str, Any] = {
         "name": None,
         "major": None,
         "minor": None,
@@ -183,7 +190,7 @@ def normalized_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
     return base
 
 
-def merge_profile(profile: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+def merge_profile(profile: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
     merged = json.loads(json.dumps(profile))
     for key, value in normalized_updates(updates).items():
         if value in (None, "", []):
@@ -202,14 +209,14 @@ def merge_profile(profile: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str,
 
 
 def compute_missing_fields(
-    profile: Dict[str, Any],
-    pending_updates: Optional[Dict[str, Any]] = None,
-) -> List[str]:
+    profile: dict[str, Any],
+    pending_updates: dict[str, Any] | None = None,
+) -> list[str]:
     merged = merge_profile(profile, pending_updates or {})
     return [f for f in REQUIRED_FIELDS if not merged.get(f)]
 
 
-def _parse_llm_json(text: str) -> Dict[str, Any]:
+def _parse_llm_json(text: str) -> dict[str, Any]:
     """Parse JSON from LLM output, tolerating literal control chars inside strings."""
     text = text.strip()
 
@@ -245,7 +252,7 @@ def _parse_llm_json(text: str) -> Dict[str, Any]:
     return json.loads(cleaned)
 
 
-def _bedrock_body(profile: Dict[str, Any], history: List[Dict[str, str]], user_message: str) -> str:
+def _bedrock_body(profile: dict[str, Any], history: list[dict[str, str]], user_message: str) -> str:
     payload = {
         "profile": profile,
         "conversation_history": history,
@@ -267,12 +274,12 @@ def _bedrock_body(profile: Dict[str, Any], history: List[Dict[str, str]], user_m
 
 
 def call_bedrock_stream(
-    profile: Dict[str, Any],
-    history: List[Dict[str, str]],
+    profile: dict[str, Any],
+    history: list[dict[str, str]],
     user_message: str,
 ) -> str:
     """Call Bedrock with streaming and return the fully accumulated response text."""
-    client = create_bedrock_runtime_client(region=AWS_REGION)
+    client = create_llm_client(region=AWS_REGION)
     response = client.invoke_model_with_response_stream(
         modelId=MODEL_ID,
         body=_bedrock_body(profile, history, user_message),
@@ -308,9 +315,9 @@ def _sse(data: Any) -> str:
 
 def _process_llm_response(
     raw_text: str,
-    profile: Dict[str, Any],
+    profile: dict[str, Any],
     latest_user_message: str,
-) -> tuple[str, Dict[str, Any], bool]:
+) -> tuple[str, dict[str, Any], bool]:
     llm_json = _parse_llm_json(raw_text)
     extracted_updates = llm_json.get("extracted_updates") or {}
     user_seems_finished = bool(llm_json.get("user_seems_finished")) or looks_like_done(
@@ -339,7 +346,7 @@ def _process_llm_response(
 def _load_lesson_roadmap_cache(student_id: str) -> dict | None:
     """Load the cached lesson roadmap for a student from `roadmap_cache`."""
     try:
-        from supabase_local import get_supabase_client
+        from db.supabase_client import get_supabase_client
 
         supabase = get_supabase_client()
         resp = (
@@ -370,7 +377,7 @@ def _load_lesson_roadmap_cache(student_id: str) -> dict | None:
 def _save_lesson_roadmap_cache(student_id: str, data: dict) -> None:
     """Upsert the cached lesson roadmap for a student into `roadmap_cache`."""
     try:
-        from supabase_local import get_supabase_client
+        from db.supabase_client import get_supabase_client
 
         supabase = get_supabase_client()
         row = {
@@ -580,9 +587,9 @@ def _generate_and_cache_lesson(lesson_id: str, persona_id: str, course: str | No
 
 def _student_has_srs_history(persona_id: str, lesson_id: str) -> bool:
     try:
+        from db.supabase_client import get_supabase_client
         from lesson_generator import resolve_student_id
         from srs import get_srs_record
-        from supabase_local import get_supabase_client
         student_id = resolve_student_id(persona_id)
         return get_srs_record(student_id, lesson_id, client=get_supabase_client()) is not None
     except Exception as exc:
@@ -602,7 +609,7 @@ def get_lesson(lesson_id: str, persona: str = Query(default="charles"), course: 
         traceback.print_exc()
         if cached:
             return cached
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/lesson/{lesson_id}/rebuild")
@@ -612,11 +619,11 @@ def rebuild_lesson(lesson_id: str, persona: str = Query(default="charles"), cour
     except Exception as exc:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
@@ -669,15 +676,15 @@ def get_due_reviews(
     student_id: str = Query(default=""),
     persona: str = Query(default="charles"),
 ) -> dict[str, Any]:
+    from db.supabase_client import get_supabase_client
     from lesson_generator import _resolve_student_id
     from srs import get_due_srs_records
-    from supabase_local import get_supabase_client
 
     if not student_id:
         try:
             student_id = _resolve_student_id(persona)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not student_id:
         raise HTTPException(status_code=400, detail="student_id is required")
 
@@ -687,13 +694,13 @@ def get_due_reviews(
     except Exception as exc:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/roadmap_position/{student_id}")
 def get_student_roadmap_position(student_id: str) -> dict[str, Any]:
+    from db.supabase_client import get_supabase_client
     from srs import get_roadmap_position
-    from supabase_local import get_supabase_client
 
     try:
         supabase = get_supabase_client()
@@ -717,7 +724,7 @@ def get_student_roadmap_position(student_id: str) -> dict[str, Any]:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/roadmap/generate/{student_id}")
@@ -741,8 +748,8 @@ def generate_student_roadmap(student_id: str) -> dict[str, Any]:
             "concepts": [{"id", "name", "description", "state"}, ...],
         }
     """
+    from db.supabase_client import get_supabase_client
     from srs import get_roadmap_position
-    from supabase_local import get_supabase_client
 
     try:
         supabase = get_supabase_client()
@@ -834,7 +841,7 @@ def generate_student_roadmap(student_id: str) -> dict[str, Any]:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/roadmap/{student_id}")
@@ -845,7 +852,7 @@ def get_student_roadmap(student_id: str) -> dict[str, Any]:
 @app.post("/roadmap/{student_id}/rebuild")
 def rebuild_student_lesson_roadmap(student_id: str) -> dict[str, Any]:
     """Force a fresh LLM-refined lesson roadmap rebuild for the student's enrolled course."""
-    from supabase_local import get_supabase_client
+    from db.supabase_client import get_supabase_client
 
     try:
         supabase = get_supabase_client()
@@ -868,7 +875,7 @@ def rebuild_student_lesson_roadmap(student_id: str) -> dict[str, Any]:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 _LESSON_HISTORY_COLUMNS = (
@@ -887,7 +894,7 @@ def list_lesson_history(
 
     Returns metadata only (no transcript). Use `/lesson_session/{session_id}` for the full log.
     """
-    from supabase_local import get_supabase_client
+    from db.supabase_client import get_supabase_client
 
     try:
         supabase = get_supabase_client()
@@ -913,13 +920,13 @@ def list_lesson_history(
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=msg)
+        raise HTTPException(status_code=500, detail=msg) from exc
 
 
 @app.get("/lesson_session/{session_id}")
 def get_lesson_session(session_id: str) -> dict[str, Any]:
     """Read a single completed lesson session, including the full transcript."""
-    from supabase_local import get_supabase_client
+    from db.supabase_client import get_supabase_client
 
     try:
         supabase = get_supabase_client()
@@ -939,11 +946,11 @@ def get_lesson_session(session_id: str) -> dict[str, Any]:
     except Exception as exc:
         msg = str(exc)
         if "lesson_sessions" in msg and ("Could not find" in msg or "PGRST205" in msg):
-            raise HTTPException(status_code=404, detail="lesson session not found")
+            raise HTTPException(status_code=404, detail="lesson session not found") from exc
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=msg)
+        raise HTTPException(status_code=500, detail=msg) from exc
 
 
 @app.get("/courses")
@@ -956,14 +963,14 @@ def get_courses_endpoint() -> dict[str, Any]:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/student/{student_id}/courses")
 def get_student_enrolled_courses(student_id: str) -> dict[str, Any]:
     """Only the Neo4j Course nodes that the student is enrolled in via student_courses."""
+    from db.supabase_client import get_supabase_client
     from graphdb.neo4j_client import get_courses
-    from supabase_local import get_supabase_client
 
     try:
         supabase = get_supabase_client()
@@ -983,13 +990,13 @@ def get_student_enrolled_courses(student_id: str) -> dict[str, Any]:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/srs/due/{student_id}")
 def get_due_reviews_for_student(student_id: str) -> dict[str, Any]:
+    from db.supabase_client import get_supabase_client
     from srs import get_upcoming_srs_records
-    from supabase_local import get_supabase_client
 
     try:
         due = get_upcoming_srs_records(student_id, days=7, client=get_supabase_client())
@@ -998,7 +1005,7 @@ def get_due_reviews_for_student(student_id: str) -> dict[str, Any]:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _clean_optional_string(value: Any) -> str | None:
@@ -1088,7 +1095,7 @@ def _clear_lesson_cache_for_profile(student_id: str, before: dict[str, Any], aft
 
 @app.get("/student/{student_id}")
 def get_student(student_id: str) -> dict[str, Any]:
-    from supabase_local import get_student_profile, get_supabase_client
+    from db.supabase_client import get_student_profile, get_supabase_client
 
     try:
         profile = get_student_profile(student_id, client=get_supabase_client())
@@ -1101,12 +1108,12 @@ def get_student(student_id: str) -> dict[str, Any]:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.patch("/student/{student_id}")
 def update_student(student_id: str, req: StudentUpdateRequest) -> dict[str, Any]:
-    from supabase_local import get_student_profile, get_supabase_client
+    from db.supabase_client import get_student_profile, get_supabase_client
 
     try:
         supabase = get_supabase_client()
@@ -1147,7 +1154,7 @@ def update_student(student_id: str, req: StudentUpdateRequest) -> dict[str, Any]
         if not updates:
             return current
 
-        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        updates["updated_at"] = datetime.now(UTC).isoformat()
         response = (
             supabase.table("students")
             .update(updates)
@@ -1169,7 +1176,7 @@ def update_student(student_id: str, req: StudentUpdateRequest) -> dict[str, Any]
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/lesson/chat")
@@ -1198,7 +1205,7 @@ async def lesson_chat(req: LessonChatRequest) -> StreamingResponse:
 
     system_prompt = f"""You are a helpful, encouraging teaching assistant guiding a student through a lesson.
 Your job is to answer questions, clarify concepts, and help the student understand the material deeply.
-Always relate your answers back to the lesson context. Be concise but thorough.
+Relate your answers back to the lesson context.
 Adapt your tone and depth to the student's profile.
 
 {persona_context}
@@ -1224,7 +1231,7 @@ Adapt your tone and depth to the student's profile.
             for m in messages[:-1]
         ]
 
-        client = create_bedrock_runtime_client(region=AWS_REGION)
+        client = create_llm_client(region=AWS_REGION)
 
         try:
             response = await asyncio.to_thread(
@@ -1258,41 +1265,41 @@ Adapt your tone and depth to the student's profile.
 class InteractiveLessonStartRequest(BaseModel):
     lesson_id: str
     persona: str = "charles"
-    course: Optional[str] = None
+    course: str | None = None
 
 
 class InteractiveLessonTickRequest(BaseModel):
     session_id: str
-    message: Optional[str] = None
-    action: Optional[str] = None
-    widget_result: Optional[Dict[str, Any]] = None
+    message: str | None = None
+    action: str | None = None
+    widget_result: dict[str, Any] | None = None
 
 
 class InteractiveLessonWidgetRequest(BaseModel):
     session_id: str
     widget_type: str
-    payload: Dict[str, Any]
-    note: Optional[str] = None
+    payload: dict[str, Any]
+    note: str | None = None
 
 
 @app.post("/lesson/interactive/start")
 def interactive_lesson_start(req: InteractiveLessonStartRequest) -> dict[str, Any]:
     """Walk a lesson dynamically using Pinecone + YouTube (same sources as /lesson) and Bedrock checkpoints."""
     try:
-        from dynamic_lesson import start_session
+        from interactive_lesson import start_session
 
         return start_session(req.lesson_id, req.persona, req.course)
     except Exception as exc:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/lesson/interactive/tick")
 def interactive_lesson_tick(req: InteractiveLessonTickRequest) -> dict[str, Any]:
     try:
-        from dynamic_lesson import tick_session
+        from interactive_lesson import tick_session
 
         return tick_session(
             req.session_id,
@@ -1301,24 +1308,24 @@ def interactive_lesson_tick(req: InteractiveLessonTickRequest) -> dict[str, Any]
             widget_result=req.widget_result,
         )
     except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found") from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         import traceback
 
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/lesson/interactive/session/{session_id}")
 def interactive_lesson_session(session_id: str) -> dict[str, Any]:
     try:
-        from dynamic_lesson import get_session_public
+        from interactive_lesson import get_session_public
 
         return get_session_public(session_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found") from None
 
 
 @app.post("/lesson/interactive/widget")
@@ -1328,7 +1335,7 @@ def interactive_lesson_enqueue_widget(req: InteractiveLessonWidgetRequest) -> di
     Lets a tool-calling layer or tests push UI without going through a reflection tick.
     """
     try:
-        from dynamic_lesson import enqueue_widget
+        from interactive_lesson import enqueue_widget
 
         return enqueue_widget(
             req.session_id,
@@ -1336,9 +1343,9 @@ def interactive_lesson_enqueue_widget(req: InteractiveLessonWidgetRequest) -> di
             note=req.note,
         )
     except KeyError:
-        raise HTTPException(status_code=404, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found") from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 if __name__ == "__main__":

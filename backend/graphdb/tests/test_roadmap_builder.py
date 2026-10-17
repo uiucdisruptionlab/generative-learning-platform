@@ -1,17 +1,16 @@
 """
 Graph-only test for lesson grouping and ordering.
 Run from backend/:
-    python -m graphdb.test_roadmap_builder
+    python -m graphdb.tests.test_roadmap_builder
 """
 
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from graphdb.roadmap_builder import build_roadmap_from_graph_data
-
 
 FAKE_GRAPH = {
     "concepts": [

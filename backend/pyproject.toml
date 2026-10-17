@@ -1,0 +1,28 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["sample_data", "lesson_cache", "logs"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import sorting, B: bugbear, UP: pyupgrade
+select = ["E", "W", "F", "I", "B", "UP"]
+# Line length is the formatter's job; long prompt strings are intentional.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "db",
+    "graphdb",
+    "ingestion",
+    "interactive_lesson",
+    "lesson_generator",
+    "llm",
+    "pc_client",
+    "pdf_ingest",
+    "srs",
+    "youtube",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# This script loads .env before importing modules that read credentials at import time.
+"graphdb/tests/test_graph.py" = ["E402"]

@@ -2,7 +2,7 @@ import { MouseEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import LearningRoadmap from '../components/LearningRoadmap'
-import type { HomeRoadmapConcept, HomeRoadmapOutcome } from '../data/homeRoadmapPreview'
+import type { HomeRoadmapConcept, HomeRoadmapOutcome } from '../data/roadmapTypes'
 import { usePersona } from '../contexts/PersonaContext'
 import {
   fetchStudentRoadmapData,

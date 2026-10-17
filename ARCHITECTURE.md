@@ -15,7 +15,7 @@ The system teaches students through an interactive lesson loop. It uses a knowle
 - **LLM:** AWS Bedrock. Example call in python:
 
 '''
- client = create_bedrock_runtime_client(region=AWS_REGION)
+ client = create_llm_client(region=AWS_REGION)
     response = client.converse(
         modelId=MODEL_ID,
         system=[{"text": system}],

@@ -14,7 +14,6 @@ import re
 from collections import defaultdict, deque
 from typing import Any
 
-
 STOPWORDS = {
     "a",
     "an",
@@ -387,7 +386,7 @@ def _topological_sort(
     lesson_titles: dict[str, str],
 ) -> list[str]:
     indegree = {node_id: 0 for node_id in node_ids}
-    for source, targets in adjacency.items():
+    for targets in adjacency.values():
         for target in targets:
             indegree[target] += 1
 

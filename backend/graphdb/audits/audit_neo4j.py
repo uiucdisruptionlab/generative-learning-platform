@@ -5,21 +5,25 @@ Audit Neo4j for nodes that don't belong to the 3 valid courses:
   - BIS512      (BIS512* chunks)
 
 Run from the repo root:
-    python backend/audit_neo4j.py
+    python backend/graphdb/audits/audit_neo4j.py
 """
 from __future__ import annotations
 
 import os
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-RESET  = "\033[0m"; BOLD = "\033[1m"; RED = "\033[31m"
-GREEN  = "\033[32m"; YELLOW = "\033[33m"; CYAN = "\033[36m"; DIM = "\033[2m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+DIM = "\033[2m"
 
 def _h(t):    return f"{BOLD}{t}{RESET}"
 def _ok(t):   return f"{GREEN}{t}{RESET}"

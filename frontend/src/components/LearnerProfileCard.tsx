@@ -9,7 +9,7 @@ export interface LearnerProfile {
   academic_level: string | number;
   weekly_hours: number;
   preferred_formats: string[] | null;
-  llm_profile: Record<string, any> | null;
+  llm_profile: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,10 +54,10 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
           {/* Avatar */}
           <div className="relative">
-            <div className="size-24 rounded-full bg-gradient-to-br from-primary to-canvas-green flex items-center justify-center text-white text-3xl font-bold font-display shadow-lg ring-4 ring-white dark:ring-slate-900">
+            <div className="size-24 rounded-full bg-gradient-to-br from-primary to-industrial flex items-center justify-center text-white text-3xl font-bold font-display shadow-lg ring-4 ring-white dark:ring-slate-900">
               {getInitials(profile.name)}
             </div>
-            <div className="absolute -bottom-1 -right-1 size-8 rounded-full bg-canvas-green border-4 border-white dark:border-slate-900 flex items-center justify-center">
+            <div className="absolute -bottom-1 -right-1 size-8 rounded-full bg-industrial border-4 border-white dark:border-slate-900 flex items-center justify-center">
               <span className="material-symbols-outlined text-white text-sm">verified</span>
             </div>
           </div>
@@ -185,7 +185,7 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
               profile.interests.map((interest, index) => (
                 <span
                   key={index}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-soft-teal dark:bg-patina/15 px-3 py-1.5 text-sm font-medium text-canvas-green border border-arches/35 dark:border-arches/20"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-soft-teal dark:bg-patina/15 px-3 py-1.5 text-sm font-medium text-industrial border border-arches/35 dark:border-arches/20"
                 >
                   <span className="material-symbols-outlined text-base">star</span>
                   {interest}
@@ -244,7 +244,7 @@ const LearnerProfileCard: React.FC<LearnerProfileCardProps> = ({ profile, onEdit
           </div>
 
           {/* Learning Style — full-width paragraph */}
-          {profile.llm_profile['Learning Style'] && (
+          {Boolean(profile.llm_profile['Learning Style']) && (
             <div className="mb-4 p-4 rounded-xl bg-purple-50/60 dark:bg-purple-900/25 border border-purple-200/60 dark:border-purple-800/40">
               <p className="text-xs font-bold uppercase tracking-widest text-purple-600 dark:text-purple-400 mb-2">
                 Learning Style

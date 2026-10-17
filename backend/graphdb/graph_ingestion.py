@@ -6,19 +6,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pc_client.models.chunks import CourseChunk
-# chunk contains: id (lec03_chunk_{chunk_number}), values (vector embedding), metadata
 from graphdb.neo4j_client import (
-    create_course,
-    get_all_concepts,
-    create_lecture,
     create_chunk,
     create_concept,
+    create_course,
+    create_lecture,
     create_relationship,
+    get_all_concepts,
+    link_chunk_to_concept,
     link_course_to_lecture,
     link_lecture_to_chunk,
-    link_chunk_to_concept,
 )
+from pc_client.models.chunks import CourseChunk
+
+# chunk contains: id (lec03_chunk_{chunk_number}), values (vector embedding), metadata
 
 
 def _derive_course_id(chunk: CourseChunk) -> str:
@@ -50,14 +51,14 @@ def ingest(chunk: CourseChunk, extracted: dict) -> None:
     print(f"[graph_ingestion] Processing chunk: {chunk.id}")
     print(f"{'='*60}")
 
-  
-    # 1. Fetch existing concepts so we can detect reuse vs. new creation  
+
+    # 1. Fetch existing concepts so we can detect reuse vs. new creation
     existing = set(get_all_concepts())
     print(f"[neo4j] Found {len(existing)} existing concept(s) in graph")
     if existing:
         print(f"         {sorted(existing)}")
 
-    # 2. Ensure the Chunk node exists                                      
+    # 2. Ensure the Chunk node exists
     create_chunk(
         id=chunk.id,
         source=chunk.metadata.offering_id,
@@ -74,7 +75,7 @@ def ingest(chunk: CourseChunk, extracted: dict) -> None:
     print(f"[neo4j] Course/Lecture structure merged: {course_id} -> {lecture_id} -> {chunk.id}")
 
 
-    # 3. Create concepts (reuse existing ones where name matches)         
+    # 3. Create concepts (reuse existing ones where name matches)
     created_concepts = []
     reused_concepts  = []
 
@@ -92,7 +93,7 @@ def ingest(chunk: CourseChunk, extracted: dict) -> None:
             print(f"[neo4j] Concept created: '{name}'  —  {description}")
 
 
-    # 4. Create relationships between concepts                            
+    # 4. Create relationships between concepts
     relationships_written = []
 
     for rel in extracted.get("relationships", []):
@@ -111,15 +112,15 @@ def ingest(chunk: CourseChunk, extracted: dict) -> None:
         relationships_written.append((from_name, rel_type, to_name))
         print(f"[neo4j] Relationship merged: ({from_name})-[:{rel_type}]->({to_name})")
 
-  
-    # 5. Link every concept to the chunk via CONTAINS edge               
+
+    # 5. Link every concept to the chunk via CONTAINS edge
     all_concept_names = [c["name"] for c in extracted.get("concepts", [])]
     for name in all_concept_names:
         link_chunk_to_concept(chunk.id, name)
         print(f"[neo4j] Linked chunk '{chunk.id}' -[:CONTAINS]-> '{name}'")
 
-  
-    # 6. Summary                                                          
+
+    # 6. Summary
     print(f"\n[summary] Chunk          : {chunk.id}")
     print(f"[summary] Concepts created: {len(created_concepts)}  {created_concepts}")
     print(f"[summary] Concepts reused : {len(reused_concepts)}  {reused_concepts}")

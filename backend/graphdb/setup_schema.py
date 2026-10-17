@@ -3,6 +3,7 @@ One-time script to create uniqueness constraints on Neo4j AuraDB.
 """
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 

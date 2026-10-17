@@ -31,7 +31,6 @@ export default {
         harvest: "#FCB316",
         prairie: "#006230",
         earth: "#7D3E13",
-        "canvas-green": "#1D58A7",
         "educational-teal": "#009FD4",
         secondary: "#FCB316",
         accent: "#13294B",

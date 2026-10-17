@@ -10,7 +10,7 @@ import os
 import re
 from typing import Any
 
-from bedrock.client import create_bedrock_runtime_client
+from llm.client import create_llm_client
 
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 BEDROCK_MODEL_ID = os.getenv(
@@ -76,9 +76,9 @@ def _extract_text_from_converse_response(response: dict[str, Any]) -> str:
 def _salvage_truncated_lessons_json(raw: str) -> dict[str, Any] | None:
     """Best-effort recovery from JSON truncated mid-lesson.
 
-    Claude Haiku's max output is 4096 tokens. On dense roadmaps the response
-    runs over and gets cut off in the middle of a lesson, breaking strict JSON
-    parsing. This walks the response, finds the last balanced lesson object
+    On dense roadmaps the response can hit the output token limit and get cut
+    off in the middle of a lesson, breaking strict JSON parsing. This walks
+    the response, finds the last balanced lesson object
     inside the `lessons` array, and reconstructs valid JSON ending there.
     Returns None if it can't find at least one complete lesson.
     """
@@ -222,26 +222,9 @@ def _normalize_refined_roadmap(refined: dict[str, Any], fallback: dict[str, Any]
     }
 
 
-# Claude 3 Haiku's max output is 4096 tokens. Dense roadmaps with concept-rich
-# lessons easily blow past that and the response gets truncated mid-lesson.
-# Cap input lessons to a count Haiku can reliably finish JSON for.
-MAX_LESSONS_FOR_REFINEMENT = 12
-
-
-def _truncate_roadmap(roadmap: dict[str, Any]) -> dict[str, Any]:
-    """Cap the number of lessons sent to the LLM to avoid token limit truncation."""
-    lessons = roadmap.get("lessons", [])
-    if len(lessons) <= MAX_LESSONS_FOR_REFINEMENT:
-        return roadmap
-    print(f"[roadmap_refiner] Truncating {len(lessons)} lessons to {MAX_LESSONS_FOR_REFINEMENT} for refinement")
-    truncated_lessons = lessons[:MAX_LESSONS_FOR_REFINEMENT]
-    return {**roadmap, "lessons": truncated_lessons, "lesson_count": len(truncated_lessons)}
-
-
 def refine_roadmap_with_llm(roadmap: dict[str, Any]) -> dict[str, Any]:
-    client = create_bedrock_runtime_client(region=AWS_REGION)
+    client = create_llm_client(region=AWS_REGION)
     last_error: Exception | None = None
-    roadmap = _truncate_roadmap(roadmap)
 
     for attempt in range(2):
         try:
@@ -254,7 +237,7 @@ def refine_roadmap_with_llm(roadmap: dict[str, Any]) -> dict[str, Any]:
                         "content": [{"text": json.dumps(roadmap, ensure_ascii=False, indent=2)}],
                     }
                 ],
-                inferenceConfig={"maxTokens": 4096, "temperature": 0},
+                inferenceConfig={"maxTokens": 16000, "temperature": 0},
             )
             raw_text = _extract_text_from_converse_response(response)
             refined = _parse_llm_json(raw_text)
