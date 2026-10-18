@@ -1,3 +1,8 @@
+"""
+-- is there a better model that we could use?
+-- refine the prompt or does it cover our requirements
+"""
+
 from __future__ import annotations
 
 import json

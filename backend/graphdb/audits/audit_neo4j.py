@@ -5,7 +5,7 @@ Audit Neo4j for nodes that don't belong to the 3 valid courses:
   - BIS512      (BIS512* chunks)
 
 Run from the repo root:
-    python backend/audit_neo4j.py
+    python backend/graphdb/audits/audit_neo4j.py
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 RESET = "\033[0m"
 BOLD = "\033[1m"

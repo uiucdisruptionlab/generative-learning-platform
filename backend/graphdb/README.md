@@ -37,7 +37,7 @@ All writes use `MERGE`, so re-running the pipeline on the same document is safe 
 | `neo4j_client.py` | Low-level Neo4j connection and Cypher operations |
 | `graph_ingestion.py` | `ingest(chunk, extracted)` — orchestrates a full write for one chunk |
 | `setup_schema.py` | One-time script to create uniqueness constraints — **already run, do not run again** |
-| `test_graph.py` | End-to-end test with fake data and a live verification query |
+| `tests/test_graph.py` | End-to-end test with fake data and a live verification query |
 
 ## Setup
 
@@ -55,7 +55,7 @@ NEO4J_DATABASE=<database-name>
 
 **3. Run the test to verify the connection and writes:**
 ```bash
-python -m graphdb.test_graph
+python -m graphdb.tests.test_graph
 ```
 
 The test creates a fake chunk about React Hooks, runs it through `ingest()`, then queries Neo4j directly to confirm the nodes and edges are present.

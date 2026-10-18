@@ -8,7 +8,7 @@ An AI-powered educational platform that ingests course documents, builds vector 
 generative-learning-platform/
 ├── backend/                  # Python ingestion pipeline and graph layer
 │   ├── server.py             # FastAPI app
-│   ├── ingest_course.py      # Ingestion entry point
+│   ├── ingestion/ingest_course.py  # Ingestion entry point
 │   ├── pdf_ingest/           # PDF extraction and text chunking
 │   ├── llm/                  # LLM and embedding client (Bedrock or OpenAI)
 │   ├── pc_client/            # Pinecone client and data models
@@ -86,10 +86,10 @@ NEO4J_DATABASE=...
 **Ingest a folder of course PDFs:**
 ```bash
 cd backend
-python ingest_course.py --course-id BIS512 --namespace BIS512 --folder sample_data/BIS512 --enable-graph-ingestion
+python -m ingestion.ingest_course --course-id BIS512 --namespace BIS512 --folder sample_data/BIS512 --enable-graph-ingestion
 ```
 
-Run `python ingest_course.py --help` for the other options.
+Run `python -m ingestion.ingest_course --help` for the other options.
 
 ## Knowledge graph
 

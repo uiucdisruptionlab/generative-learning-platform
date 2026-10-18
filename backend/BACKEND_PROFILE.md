@@ -39,10 +39,10 @@ A file-by-file map of `backend/`, grouped by responsibility. Files are ordered b
 | `graphdb/neo4j_client.py` | 522 | **Every Cypher query.** Connection (`_driver`), reads (`get_concept_roadmap_scoped`, `get_lecture_grouped_concepts`, `get_chunks_for_concept`, `get_courses`, `get_concepts_by_lecture`, etc.), writes (`create_course`, `create_lecture`, `create_chunk`, `create_concept`, `create_relationship`, `link_*`). |
 | `graphdb/graph_ingestion.py` | 126 | `ingest(chunk, extracted)` — the orchestrator called from `ingest_course.py` per-chunk: ensures the Chunk node, derives course / lecture, MERGEs concepts and relationships, and links chunk → concept via CONTAINS edges. |
 | `graphdb/setup_schema.py` | 36 | **Already-run** one-time script to create uniqueness constraints on `Concept.name` and `Chunk.id`. |
-| `graphdb/test_graph.py` | 126 | E2E test: ingests a fake React-Hooks chunk, verifies the resulting graph. |
-| `graphdb/test_roadmap_builder.py` | 50 | Unit test for `build_roadmap_from_graph_data` with a fake CS graph. |
+| `graphdb/tests/test_graph.py` | 126 | E2E test: ingests a fake React-Hooks chunk, verifies the resulting graph. |
+| `graphdb/tests/test_roadmap_builder.py` | 50 | Unit test for `build_roadmap_from_graph_data` with a fake CS graph. |
 | `graphdb/README.md` | — | Human docs for the graph layer (data model, integration point). |
-| `concept_extractor.py` | 282 | **Bedrock concept extraction.** Given one chunk, asks Claude Haiku for `{concepts[], relationships[]}` JSON. Used by `main.py` during ingestion. Validates relationship types against `{PREREQUISITE_OF, RELATED_TO, PART_OF}`. |
+| `ingestion/concept_extractor.py` | 282 | **Bedrock concept extraction.** Given one chunk, asks Claude Haiku for `{concepts[], relationships[]}` JSON. Used by `ingestion/ingest_course.py` during ingestion. Validates relationship types against `{PREREQUISITE_OF, RELATED_TO, PART_OF}`. |
 
 ## Vector DB (Pinecone)
 
@@ -93,7 +93,7 @@ A file-by-file map of `backend/`, grouped by responsibility. Files are ordered b
 | File | LOC | What it does |
 |---|---|---|
 | `requirements.txt` | — | Python dependencies. |
-| `ingestion_pipeline.txt` | 13 | Plaintext ascii diagram of the ingestion flow. |
+| `ingestion/ingestion_pipeline.txt` | 13 | Plaintext ascii diagram of the ingestion flow. |
 | `roadmap_cache_accounting.json` / `roadmap_cache_python.json` | — | **Legacy** on-disk cache for the older `/roadmap?course=` endpoint (different shape from the new lesson roadmap). Not currently consumed by the live web flow but `server.py:_load_roadmap_cache` still reads them if the route is hit. Safe to delete if no caller is using `/roadmap?course=…`. |
 | `lesson_cache/` | — | On-disk cache for the older `/lesson/{id}` endpoint (one JSON per persona / lesson). Currently only contains `charles_accounting/lesson_001.json`. |
 

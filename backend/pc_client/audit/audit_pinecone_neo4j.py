@@ -2,7 +2,7 @@
 Audit: chunk IDs present in Neo4j but missing from Pinecone.
 Checks vectors against the 4 course-level namespaces only.
 Run from the repo root:
-    python backend/audit_pinecone_neo4j.py
+    python backend/pc_client/audit/audit_pinecone_neo4j.py
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 # ── ANSI colours ─────────────────────────────────────────────────────────────
 RESET = "\033[0m"

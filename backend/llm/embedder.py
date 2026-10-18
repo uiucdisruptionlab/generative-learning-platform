@@ -43,3 +43,10 @@ class Embedder:
             image_bytes = f.read()
 
         return self.embed_image(image_bytes)
+
+
+"""
+currently the costs are text embeddings + image embeddings, could be possibly expensive
+might alternatively use another amazon embedding model that does it one go, or cohere, etc. and open source models (qwen)
+that use less money per token + more efficient + better search because text matching is not only word by word but meaning
+"""

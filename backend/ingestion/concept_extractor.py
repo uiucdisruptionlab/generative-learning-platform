@@ -1,9 +1,15 @@
+"""
+Converts the inputted [pdf?] into concept
+"""
+
 import json
 import os
 import re
 from typing import Any
 
 from llm.client import create_llm_client
+
+# TODO: REPLACE THIS MODEL HERE
 
 AWS_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 BEDROCK_MODEL_ID = os.getenv(

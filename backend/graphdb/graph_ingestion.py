@@ -1,3 +1,6 @@
+"""
+Inputting a new chunk (lecture) into the graph database
+"""
 import sys
 from pathlib import Path
 
@@ -15,6 +18,8 @@ from graphdb.neo4j_client import (
     link_lecture_to_chunk,
 )
 from pc_client.models.chunks import CourseChunk
+
+# chunk contains: id (lec03_chunk_{chunk_number}), values (vector embedding), metadata
 
 
 def _derive_course_id(chunk: CourseChunk) -> str:

@@ -11,9 +11,9 @@ ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "concept_extractor",
     "db",
     "graphdb",
+    "ingestion",
     "interactive_lesson",
     "lesson_generator",
     "llm",
@@ -25,4 +25,4 @@ known-first-party = [
 
 [tool.ruff.lint.per-file-ignores]
 # This script loads .env before importing modules that read credentials at import time.
-"graphdb/test_graph.py" = ["E402"]
+"graphdb/tests/test_graph.py" = ["E402"]

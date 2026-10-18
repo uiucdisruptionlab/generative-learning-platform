@@ -13,6 +13,25 @@ _USERNAME = os.getenv("NEO4J_USERNAME")
 _PASSWORD = os.getenv("NEO4J_PASSWORD")
 _DATABASE = os.getenv("NEO4J_DATABASE")
 
+"""
+**1st suggestion:**
+since currently we call the driver repeatedly, everytime we have to create a fresh connection and it creates network overhead
+possibly try to create the driver in the start, have it running throughout (believe it does multi threading so it can cope with being run constantly
+and have a flag to identify when it should be closed
+
+
+**2nd suggestion:**
+could we use OGM (similar to ORM, Raw SQL strings are vulnerable to SQL injection if input sanitization is missed.
+ORMs automatically apply query parameterization, ensuring user input is safely handled by default.) is it necessary for this case?
+-- since we have complex graph queries
+
+// The OGM completely manages the underlying connection and transaction boilerplate
+const result = await ogm.cypher("MATCH (u:User)-[:POSTED]->(p:Post) RETURN u, p");
+
+**3rd suggestion:**
+for ease of knowing whats in the graph database, maybe a rough schema.json type of file?
+"""
+
 _VALID_REL_TYPES = {"PREREQUISITE_OF", "RELATED_TO", "PART_OF"}
 
 COURSE_KEY_MAP: dict[str, str] = {

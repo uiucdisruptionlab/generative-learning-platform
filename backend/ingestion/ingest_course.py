@@ -7,15 +7,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from concept_extractor import extract_concepts_from_chunk
 from graphdb.graph_ingestion import ingest as ingest_graph
+from ingestion.concept_extractor import extract_concepts_from_chunk
 from llm.embedder import Embedder
 from pc_client.client import PineconeClient
 from pc_client.models.chunks import ChunkMetadata, CourseChunk
 from pdf_ingest.pdf_text_extractor import PDFTextExtractor
 from pdf_ingest.text_chunker import TextChunker
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 def lecture_sort_key(path: Path) -> tuple[int, str]:
@@ -116,7 +116,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest a folder of course PDFs into Pinecone and Neo4j.")
     parser.add_argument("--course-id", default="BIS512")
     parser.add_argument("--course-title", default="Financing Economic Development")
-    parser.add_argument("--folder", default=str(Path(__file__).parent / "sample_data" / "BIS512"))
+    parser.add_argument("--folder", default=str(Path(__file__).resolve().parents[1] / "sample_data" / "BIS512"))
     parser.add_argument("--namespace", default="BIS512")
     parser.add_argument("--graph-only", action="store_true")
     parser.add_argument("--enable-graph-ingestion", action="store_true")
